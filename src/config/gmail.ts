@@ -16,10 +16,11 @@ export interface EmailQueryOptions {
   beforeDate?: string;
   label?: string;
   folder?: string;
+  unreadOnly?: boolean;
 }
 
 export const buildEmailQuery = (options: EmailQueryOptions): string => {
-  const { senders, afterDate, beforeDate, label, folder } = options;
+  const { senders, afterDate, beforeDate, label, folder, unreadOnly } = options;
 
   const fromParts = senders.map(s => `from:${s}`);
   let q = `(${fromParts.join(' OR ')})`;
@@ -32,6 +33,7 @@ export const buildEmailQuery = (options: EmailQueryOptions): string => {
     q += ` label:${label}`;
   }
 
+  if (unreadOnly) q += ` is:unread`;
   if (afterDate) q += ` after:${afterDate}`;
   if (beforeDate) q += ` before:${beforeDate}`;
 

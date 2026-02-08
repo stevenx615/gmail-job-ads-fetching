@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { getAllJobs, deleteJob, toggleJobSaved } from '../services/jobService';
 import type { Job } from '../types';
 
@@ -21,12 +21,13 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const jobListRef = useRef<HTMLDivElement>(null);
   const pageSize = 20;
 
-  const loadJobs = useCallback(async () => {
+  const loadJobs = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
-      const fetchedJobs = await getAllJobs();
+      const fetchedJobs = await getAllJobs(forceRefresh);
       setJobs(fetchedJobs);
       setError(null);
     } catch (err) {
@@ -37,8 +38,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     }
   }, []);
 
+  const refreshTriggerRef = useRef(refreshTrigger);
   useEffect(() => {
-    loadJobs();
+    // Force refresh when refreshTrigger changes (after email fetch), use cache on initial mount
+    const forceRefresh = refreshTriggerRef.current !== refreshTrigger;
+    refreshTriggerRef.current = refreshTrigger;
+    loadJobs(forceRefresh);
   }, [loadJobs, refreshTrigger]);
 
   const sources = useMemo(() => {
@@ -128,6 +133,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   }, [jobs, savedFilter, typeFilter, sourceFilter, locationSearch, searchTerm, sortBy]);
 
   useEffect(() => { setCurrentPage(1); }, [savedFilter, typeFilter, sourceFilter, locationSearch, searchTerm, sortBy]);
+  useEffect(() => { jobListRef.current?.scrollTo({ top: 0 }); }, [currentPage]);
 
   const totalPages = Math.max(1, Math.ceil(filteredJobs.length / pageSize));
   const paginatedJobs = filteredJobs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -386,7 +392,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
           </div>
 
           {/* Job Cards */}
-          <div className="job-list-scroll">
+          <div className="job-list-scroll" ref={jobListRef}>
             {filteredJobs.length === 0 ? (
               <div className="empty-state">
                 {jobs.length === 0
@@ -406,7 +412,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                     <div className="job-card-body">
                       <div className="job-card-top">
                         <div>
-                          <h3 className="job-card-title">{job.title}</h3>
+                          <h3 className="job-card-title">{job.url ? <a href={job.url} target="_blank" rel="noopener noreferrer">{job.title}</a> : job.title}</h3>
                           <p className="job-card-company">{job.company}</p>
                         </div>
                         <div className="job-card-actions">
@@ -452,15 +458,15 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                       </div>
                       <div className="job-card-tags">
                         {job.source && (
-                          <span className={`source-tag ${getSourceBadgeClass(job.source)}`}>
+                          <button className={`source-tag ${getSourceBadgeClass(job.source)}`} onClick={() => setSourceFilter(job.source)}>
                             {job.source}
-                          </span>
+                          </button>
                         )}
                         {job.type && (
-                          <span className={`type-badge ${getTypeBadgeClass(job.type)}`}>{job.type}</span>
+                          <button className={`type-badge ${getTypeBadgeClass(job.type)}`} onClick={() => setTypeFilter(job.type)}>{job.type}</button>
                         )}
                         {job.tags?.map(tag => (
-                          <span key={tag} className="tag">{tag}</span>
+                          <button key={tag} className="tag" onClick={() => setSearchTerm(tag)}>{tag}</button>
                         ))}
                         {getRepostCount(job) > 1 && (
                           <button

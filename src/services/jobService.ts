@@ -6,7 +6,6 @@ import {
   updateDoc,
   doc,
   query,
-  where,
   orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -15,11 +14,16 @@ import type { Job, NewJob } from '../types';
 
 const COLLECTION_NAME = 'jobs';
 
-export async function getAllJobs(): Promise<Job[]> {
+// In-memory cache to avoid redundant Firestore reads
+let jobsCache: Job[] | null = null;
+
+export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
+  if (jobsCache && !forceRefresh) return jobsCache;
+
   const jobsCollection = collection(db, COLLECTION_NAME);
   const q = query(jobsCollection, orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(d => {
+  jobsCache = snapshot.docs.map(d => {
     const data = d.data();
     return {
       id: d.id,
@@ -28,6 +32,11 @@ export async function getAllJobs(): Promise<Job[]> {
       type: (data.type || '').toLowerCase(),
     };
   }) as Job[];
+  return jobsCache;
+}
+
+export function invalidateJobsCache(): void {
+  jobsCache = null;
 }
 
 export async function addJob(jobData: NewJob): Promise<string> {
@@ -42,11 +51,18 @@ export async function addJob(jobData: NewJob): Promise<string> {
 export async function deleteJob(id: string): Promise<void> {
   const jobDoc = doc(db, COLLECTION_NAME, id);
   await deleteDoc(jobDoc);
+  // Update cache in place instead of re-fetching
+  if (jobsCache) {
+    jobsCache = jobsCache.filter(j => j.id !== id);
+  }
 }
 
 export async function toggleJobSaved(id: string, saved: boolean): Promise<void> {
   const jobDoc = doc(db, COLLECTION_NAME, id);
   await updateDoc(jobDoc, { saved });
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => j.id === id ? { ...j, saved } : j);
+  }
 }
 
 const MAX_URL_LENGTH = 1400;
@@ -59,15 +75,13 @@ export class DedupCache {
   private urls = new Set<string>();
   private titleCompany = new Set<string>();
 
-  static async load(): Promise<DedupCache> {
+  /** Build from already-loaded jobs array — zero Firestore reads */
+  static fromJobs(jobs: Job[]): DedupCache {
     const cache = new DedupCache();
-    const jobsCollection = collection(db, COLLECTION_NAME);
-    const snapshot = await getDocs(jobsCollection);
-    for (const d of snapshot.docs) {
-      const data = d.data();
-      if (data.url) cache.urls.add(data.url);
-      if (data.title && data.company) {
-        cache.titleCompany.add(`${data.title}|${data.company}`);
+    for (const job of jobs) {
+      if (job.url) cache.urls.add(job.url);
+      if (job.title && job.company) {
+        cache.titleCompany.add(`${job.title}|${job.company}`);
       }
     }
     return cache;
@@ -93,10 +107,9 @@ export async function addJobIfNotExists(jobData: NewJob, cache?: DedupCache): Pr
     cache.add(safeJob);
     return id;
   }
-  // Fallback without cache (single job)
-  const jobsCollection = collection(db, COLLECTION_NAME);
-  const q = query(jobsCollection, where('url', '==', safeJob.url));
-  const snapshot = await getDocs(q);
-  if (!snapshot.empty) return null;
+  // Fallback without cache
+  const jobs = await getAllJobs();
+  const exists = jobs.some(j => j.url === safeJob.url || (j.title === safeJob.title && j.company === safeJob.company));
+  if (exists) return null;
   return addJob(safeJob);
 }

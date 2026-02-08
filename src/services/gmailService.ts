@@ -9,16 +9,18 @@ function sleep(ms: number): Promise<void> {
 
 export async function listMessageIds(
   query: string,
-  maxResults = 100
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const ids: string[] = [];
   let pageToken: string | undefined;
 
-  while (ids.length < maxResults) {
+  do {
+    if (signal?.aborted) throw new Error('Stopped');
+
     const response = await gapi.client.gmail.users.messages.list({
       userId: 'me',
       q: query,
-      maxResults: Math.min(100, maxResults - ids.length),
+      maxResults: 100,
       ...(pageToken ? { pageToken } : {}),
     });
 
@@ -26,8 +28,7 @@ export async function listMessageIds(
     ids.push(...messages.map(m => m.id));
 
     pageToken = response.result.nextPageToken ?? undefined;
-    if (!pageToken || messages.length === 0) break;
-  }
+  } while (pageToken);
 
   return ids;
 }
@@ -43,11 +44,14 @@ export async function getMessage(messageId: string): Promise<GmailMessage> {
 
 export async function getMessages(
   messageIds: string[],
-  onProgress?: (fetched: number, total: number) => void
+  onProgress?: (fetched: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<GmailMessage[]> {
   const results: GmailMessage[] = [];
 
   for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+    if (signal?.aborted) throw new Error('Stopped');
+
     const batch = messageIds.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(batch.map(id => getMessage(id)));
     results.push(...batchResults);
@@ -148,9 +152,12 @@ export async function archiveMessage(messageId: string): Promise<void> {
 
 export async function archiveMessages(
   messageIds: string[],
-  onProgress?: (archived: number, total: number) => void
+  onProgress?: (archived: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+    if (signal?.aborted) throw new Error('Stopped');
+
     const batch = messageIds.slice(i, i + BATCH_SIZE);
     await Promise.all(batch.map(id => archiveMessage(id)));
     onProgress?.(Math.min(i + BATCH_SIZE, messageIds.length), messageIds.length);

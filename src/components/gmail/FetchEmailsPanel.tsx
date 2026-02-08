@@ -35,6 +35,7 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
   const [folder, setFolder] = useState('INBOX');
   const [label, setLabel] = useState('');
   const [shouldArchive, setShouldArchive] = useState(true);
+  const [unreadOnly, setUnreadOnly] = useState(true);
 
   const [labels, setLabels] = useState<GmailLabel[]>([]);
   const [labelsLoaded, setLabelsLoaded] = useState(false);
@@ -98,6 +99,7 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
       label: label || undefined,
       folder: folder || undefined,
       shouldArchive,
+      unreadOnly,
     });
     onFetchComplete();
   };
@@ -231,8 +233,17 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
                 </div>
               </div>
 
-              {/* Archive checkbox */}
+              {/* Options checkboxes */}
               <div className="modal-section">
+                <label className="modal-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={unreadOnly}
+                    onChange={e => setUnreadOnly(e.target.checked)}
+                    disabled={isFetching}
+                  />
+                  Unread emails only
+                </label>
                 <label className="modal-checkbox-label">
                   <input
                     type="checkbox"

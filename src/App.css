@@ -75,8 +75,9 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .stat-type-data-entry .stat-value { color: #f59e0b; }
 .stat-type-other .stat-value { color: #d2d9e3; }
 
-.hero-search { display: flex; align-items: center; max-width: 750px; margin: 0 auto; background: #fff; border-radius: 50px; padding: 0.35rem 0.35rem 0.35rem 1.25rem; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
-.hero-input-group { display: flex; align-items: center; gap: 0.6rem; flex: 1; }
+.hero-search { display: flex; align-items: center; max-width: 1000px; width: 100%; margin: 0 auto; background: #fff; border-radius: 50px; padding: 0.35rem 0.35rem 0.35rem 1.25rem; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+.hero-input-group { display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 0; }
+.hero-input-group:first-child { flex: 2; }
 .hero-icon { color: var(--text-light); flex-shrink: 0; }
 .hero-input { border: none; outline: none; font-size: 0.9rem; color: var(--text-dark); width: 100%; background: transparent; padding: 0.5rem 0; }
 .hero-input::placeholder { color: var(--text-light); }
@@ -88,7 +89,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .hero-divider { width: 1px; height: 28px; background: #e2e8f0; margin: 0 0.75rem; flex-shrink: 0; }
 .hero-clear-btn { background: none; border: none; color: var(--text-light); font-size: 1.2rem; cursor: pointer; padding: 0 0.5rem; line-height: 1; transition: color 0.15s; flex-shrink: 0; }
 .hero-clear-btn:hover { color: var(--danger); }
-.hero-search-btn { background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.5rem; border-radius: 50px; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+.hero-search-btn { background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.5rem; border-radius: 50px; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.15s; flex-shrink: 0; }
 .hero-search-btn:hover { background: var(--accent-hover); }
 
 .hero-tags { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
@@ -133,7 +134,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 
 /* ===== JOB CARD ===== */
 .job-card { background: var(--card-bg); border: none; border-radius: var(--radius); padding: 1.25rem; display: flex; gap: 1rem; align-items: flex-start; transition: all 0.15s; box-shadow: var(--card-shadow); }
-.job-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.job-card:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
 .job-card.selected { background: #f0fdf4; box-shadow: 0 0 0 2px var(--accent); }
 .job-checkbox { width: 16px; height: 16px; margin-top: 0.25rem; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
 
@@ -141,9 +142,12 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .job-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .job-card-title-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .job-card-title { font-size: 1.15rem; font-weight: 600; color: var(--text-dark); }
+.job-card-title a { color: var(--text-dark); text-decoration: none; }
+.job-card-title a:hover { color: var(--accent); }
 .job-card-company { font-size: 0.88rem; color: var(--text-mid); margin-top: 0.4rem; }
 
-.type-badge { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: capitalize; white-space: nowrap; }
+.type-badge { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: capitalize; white-space: nowrap; border: none; cursor: pointer; opacity: 0.9; }
+.type-badge:hover { opacity: 1; }
 .badge-developer { background: var(--blue); color: #ffffff; }
 .badge-gamedev { background: var(--purple); color: #fff; }
 .badge-designer { background: var(--pink); color: #fff; }
@@ -167,12 +171,14 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .meta-item svg { color: var(--text-light); }
 
 .job-card-tags { display: flex; gap: 0.4rem; margin-top: 0.75rem; flex-wrap: wrap; }
-.source-tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; border: none; text-transform: capitalize; }
+.source-tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; border: none; text-transform: capitalize; cursor: pointer; opacity: 0.9; }
+.source-tag:hover { opacity: 1; }
 .source-linkedin { background: #e9e1ff; color: #8860f6; }
 .source-indeed { background: #dfedfd; color: #4878f1; }
 .source-glassdoor { background: #d9fbe6; color: #1c9f32; }
 .source-other { background: #dadadb; color: #fff; }
-.tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; color: var(--text-mid); border: none; background: #e2e8f0; text-transform: capitalize; }
+.tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; color: var(--text-mid); border: none; background: #e2e8f0; text-transform: capitalize; cursor: pointer; opacity: 0.9; }
+.tag:hover { opacity: 1; }
 .repost-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; border: none; cursor: pointer; background: #fef2f2; color: var(--danger); transition: all 0.15s; }
 .repost-badge:hover { background: #fee2e2; }
 
