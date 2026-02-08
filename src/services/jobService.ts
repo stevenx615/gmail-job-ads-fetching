@@ -55,16 +55,48 @@ function truncateUrl(url: string): string {
   return url.length > MAX_URL_LENGTH ? url.slice(0, MAX_URL_LENGTH) : url;
 }
 
-export async function jobExistsByUrl(url: string): Promise<boolean> {
-  const jobsCollection = collection(db, COLLECTION_NAME);
-  const q = query(jobsCollection, where('url', '==', truncateUrl(url)));
-  const snapshot = await getDocs(q);
-  return !snapshot.empty;
+export class DedupCache {
+  private urls = new Set<string>();
+  private titleCompany = new Set<string>();
+
+  static async load(): Promise<DedupCache> {
+    const cache = new DedupCache();
+    const jobsCollection = collection(db, COLLECTION_NAME);
+    const snapshot = await getDocs(jobsCollection);
+    for (const d of snapshot.docs) {
+      const data = d.data();
+      if (data.url) cache.urls.add(data.url);
+      if (data.title && data.company) {
+        cache.titleCompany.add(`${data.title}|${data.company}`);
+      }
+    }
+    return cache;
+  }
+
+  has(job: NewJob): boolean {
+    if (this.urls.has(truncateUrl(job.url))) return true;
+    if (this.titleCompany.has(`${job.title}|${job.company}`)) return true;
+    return false;
+  }
+
+  add(job: NewJob): void {
+    this.urls.add(truncateUrl(job.url));
+    this.titleCompany.add(`${job.title}|${job.company}`);
+  }
 }
 
-export async function addJobIfNotExists(jobData: NewJob): Promise<string | null> {
+export async function addJobIfNotExists(jobData: NewJob, cache?: DedupCache): Promise<string | null> {
   const safeJob = { ...jobData, url: truncateUrl(jobData.url) };
-  const exists = await jobExistsByUrl(safeJob.url);
-  if (exists) return null;
+  if (cache) {
+    if (cache.has(safeJob)) return null;
+    const id = await addJob(safeJob);
+    cache.add(safeJob);
+    return id;
+  }
+  // Fallback without cache (single job)
+  const jobsCollection = collection(db, COLLECTION_NAME);
+  const q = query(jobsCollection, where('url', '==', safeJob.url));
+  const snapshot = await getDocs(q);
+  if (!snapshot.empty) return null;
   return addJob(safeJob);
 }

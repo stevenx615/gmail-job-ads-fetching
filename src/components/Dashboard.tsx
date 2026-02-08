@@ -20,7 +20,8 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const pageSize = 20;
 
   const loadJobs = useCallback(async () => {
     try {
@@ -53,6 +54,48 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   }, [jobs]);
 
   const savedCount = useMemo(() => jobs.filter(j => j.saved).length, [jobs]);
+
+  const uniqueLocations = useMemo(() => {
+    const locMap = new Map<string, number>();
+    jobs.forEach(job => {
+      const loc = (job.location || '').trim();
+      if (loc) {
+        const key = loc.toLowerCase();
+        locMap.set(key, (locMap.get(key) || 0) + 1);
+      }
+    });
+    return Array.from(locMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([loc, count]) => ({ label: loc, count }));
+  }, [jobs]);
+
+  const filteredLocations = useMemo(() => {
+    if (!locationSearch) return uniqueLocations;
+    const term = locationSearch.toLowerCase();
+    return uniqueLocations.filter(l => l.label.includes(term));
+  }, [uniqueLocations, locationSearch]);
+
+  const repostCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    jobs.forEach(job => {
+      const key = `${(job.title || '').toLowerCase()}|${(job.company || '').toLowerCase()}`;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, [jobs]);
+
+  const getRepostCount = (job: Job) => {
+    const key = `${(job.title || '').toLowerCase()}|${(job.company || '').toLowerCase()}`;
+    return repostCounts[key] || 1;
+  };
+
+  const handleRepostClick = (job: Job) => {
+    setSearchTerm(job.title);
+    setTypeFilter('all');
+    setSourceFilter('all');
+    setSavedFilter(false);
+    setLocationSearch('');
+  };
 
   const filteredJobs = useMemo(() => {
     let result = [...jobs];
@@ -176,6 +219,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
       case 'game-dev': return 'badge-gamedev';
       case 'designer': return 'badge-designer';
       case 'it-support': return 'badge-itsupport';
+      case 'data-entry': return 'badge-dataentry';
       default: return 'badge-other';
     }
   };
@@ -217,17 +261,49 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
             />
           </div>
           <div className="hero-divider" />
-          <div className="hero-input-group">
+          <div className="hero-input-group hero-location-wrapper">
             <svg className="hero-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
             <input
               type="text"
               placeholder="City, state, or remote"
               value={locationSearch}
-              onChange={e => setLocationSearch(e.target.value)}
+              onChange={e => { setLocationSearch(e.target.value); setShowLocationDropdown(true); }}
+              onFocus={() => setShowLocationDropdown(true)}
+              onBlur={() => setShowLocationDropdown(false)}
               className="hero-input"
             />
+            {showLocationDropdown && filteredLocations.length > 0 && (
+              <div className="location-dropdown">
+                {filteredLocations.map(loc => (
+                  <button
+                    key={loc.label}
+                    className="location-option"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => { setLocationSearch(loc.label); setShowLocationDropdown(false); }}
+                  >
+                    <span>{loc.label}</span>
+                    <span className="location-count">{loc.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+          {(searchTerm || locationSearch) && (
+            <button className="hero-clear-btn" onClick={() => { setSearchTerm(''); setLocationSearch(''); }} title="Clear search">&times;</button>
+          )}
           <button className="hero-search-btn" onClick={() => {}}>Search Jobs</button>
+        </div>
+        <div className="hero-tags">
+          <span className="hero-tags-label">Popular:</span>
+          {['junior', 'entry level', 'intern', 'remote', 'developer', 'it support'].map(tag => (
+            <button
+              key={tag}
+              className={`hero-tag ${searchTerm.toLowerCase() === tag ? 'active' : ''}`}
+              onClick={() => setSearchTerm(prev => prev.toLowerCase() === tag ? '' : tag)}
+            >
+              {tag}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -283,13 +359,20 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
           {/* Results Header */}
           <div className="results-header">
             <div className="results-header-left">
-              <span className="results-count">{filteredJobs.length} Jobs Found</span>
-              <button className="select-page-btn" onClick={selectAllVisible}>
-                {paginatedJobs.length > 0 && paginatedJobs.every(j => selectedIds.has(j.id)) ? 'Deselect Page' : 'Select Page'}
-              </button>
+              <input
+                type="checkbox"
+                className="select-all-checkbox"
+                checked={paginatedJobs.length > 0 && paginatedJobs.every(j => selectedIds.has(j.id))}
+                onChange={selectAllVisible}
+                title={paginatedJobs.length > 0 && paginatedJobs.every(j => selectedIds.has(j.id)) ? 'Deselect page' : 'Select page'}
+              />
+              <span className="results-count">
+                {selectedIds.size > 0 ? `${selectedIds.size} selected` : `${filteredJobs.length} Jobs Found`}
+              </span>
               {selectedIds.size > 0 && (
                 <button className="delete-selected-btn" onClick={handleBulkDelete} disabled={isDeleting}>
-                  {isDeleting ? `Deleting...` : `Delete ${selectedIds.size}`}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  {isDeleting ? 'Deleting...' : 'Delete'}
                 </button>
               )}
             </div>
@@ -379,6 +462,16 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                         {job.tags?.map(tag => (
                           <span key={tag} className="tag">{tag}</span>
                         ))}
+                        {getRepostCount(job) > 1 && (
+                          <button
+                            className="repost-badge"
+                            onClick={() => handleRepostClick(job)}
+                            title={`Seen ${getRepostCount(job)} times — click to view all`}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                            {getRepostCount(job)}x
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

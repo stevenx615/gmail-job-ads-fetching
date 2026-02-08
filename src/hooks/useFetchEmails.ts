@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { listMessageIds, getMessages, getMessageDate, archiveMessages } from '../services/gmailService';
 import { parseEmail } from '../parsers/parserRegistry';
-import { addJobIfNotExists } from '../services/jobService';
+import { addJobIfNotExists, DedupCache } from '../services/jobService';
 import { buildEmailQuery } from '../config/gmail';
 import type { EmailQueryOptions } from '../config/gmail';
 import type { FetchProgress, NewJob } from '../types';
@@ -113,18 +113,21 @@ export function useFetchEmails() {
         }));
       }
 
-      // Phase 4: Save to Firestore (dedup by URL)
+      // Phase 4: Save to Firestore (dedup by URL + title/company)
       setProgress({
         phase: 'saving',
         current: 0,
         total: allJobs.length,
-        message: `Saving ${allJobs.length} jobs to database...`,
+        message: 'Loading dedup cache...',
         newJobsCount: 0,
       });
 
+      const cache = await DedupCache.load();
+      if (cancelledRef.current) throw new Error('Stopped');
+
       for (let i = 0; i < allJobs.length; i++) {
         if (cancelledRef.current) throw new Error('Stopped');
-        const result = await addJobIfNotExists(allJobs[i]);
+        const result = await addJobIfNotExists(allJobs[i], cache);
         if (result) newJobsCount++;
 
         setProgress(prev => ({
