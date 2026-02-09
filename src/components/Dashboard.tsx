@@ -94,6 +94,17 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     return repostCounts[key] || 1;
   };
 
+  const hasFilters = searchTerm || locationSearch || typeFilter !== 'all' || sourceFilter !== 'all' || savedFilter;
+
+  const clearAllFilters = () => {
+    setSearchTerm('');
+    setLocationSearch('');
+    setTypeFilter('all');
+    setSourceFilter('all');
+    setSavedFilter(false);
+    setSortBy('date-desc');
+  };
+
   const handleRepostClick = (job: Job) => {
     setSearchTerm(job.title);
     setTypeFilter('all');
@@ -294,8 +305,8 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
               </div>
             )}
           </div>
-          {(searchTerm || locationSearch) && (
-            <button className="hero-clear-btn" onClick={() => { setSearchTerm(''); setLocationSearch(''); }} title="Clear search">&times;</button>
+          {hasFilters && (
+            <button className="hero-clear-btn" onClick={clearAllFilters} title="Clear all filters">&times;</button>
           )}
           <button className="hero-search-btn" onClick={() => {}}>Search Jobs</button>
         </div>
@@ -379,6 +390,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                 <button className="delete-selected-btn" onClick={handleBulkDelete} disabled={isDeleting}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                   {isDeleting ? 'Deleting...' : 'Delete'}
+                </button>
+              )}
+              {hasFilters && selectedIds.size === 0 && (
+                <button className="clear-filters-btn" onClick={clearAllFilters}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  Clear Filters
                 </button>
               )}
             </div>

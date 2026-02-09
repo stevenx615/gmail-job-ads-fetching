@@ -35,7 +35,15 @@ export const buildEmailQuery = (options: EmailQueryOptions): string => {
 
   if (unreadOnly) q += ` is:unread`;
   if (afterDate) q += ` after:${afterDate}`;
-  if (beforeDate) q += ` before:${beforeDate}`;
+  if (beforeDate) {
+    // UI shows inclusive dates; Gmail "before:" is exclusive, so +1 day
+    const d = new Date(beforeDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    q += ` before:${y}-${m}-${day}`;
+  }
 
   return q;
 };
