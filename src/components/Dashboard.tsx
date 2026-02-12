@@ -41,12 +41,15 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   }, [showReadJobs]);
 
   const refreshTriggerRef = useRef(refreshTrigger);
+  const showReadJobsRef = useRef(showReadJobs);
   useEffect(() => {
-    // Force refresh when refreshTrigger changes (after email fetch), use cache on initial mount
-    const forceRefresh = refreshTriggerRef.current !== refreshTrigger;
+    // Force refresh when showReadJobs changes (toggling between unread/all views)
+    // Also force refresh when refreshTrigger changes (after email fetch)
+    const forceRefresh = refreshTriggerRef.current !== refreshTrigger || showReadJobsRef.current !== showReadJobs;
     refreshTriggerRef.current = refreshTrigger;
+    showReadJobsRef.current = showReadJobs;
     loadJobs(forceRefresh);
-  }, [loadJobs, refreshTrigger]);
+  }, [loadJobs, refreshTrigger, showReadJobs]);
 
   const sources = useMemo(() => {
     const srcSet = new Set<string>();
