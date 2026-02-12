@@ -361,9 +361,10 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
           <button
             className={`saved-filter-btn ${showReadJobs ? 'active' : ''}`}
             onClick={() => setShowReadJobs(f => !f)}
+            title={showReadJobs ? 'Showing all jobs (including read)' : 'Showing unread jobs only'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill={showReadJobs ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>{showReadJobs ? 'All Jobs' : 'Unread Only'}</span>
+            <span>{showReadJobs ? 'Show Unread Only' : 'Show Read Jobs'}</span>
           </button>
 
           <div className="filter-section">
