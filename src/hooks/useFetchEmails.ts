@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { listMessageIds, getMessages, getMessageDate, archiveMessages } from '../services/gmailService';
 import { parseEmail } from '../parsers/parserRegistry';
-import { addJobIfNotExists } from '../services/jobService';
+import { addJobIfNotExists, DedupCache, getAllJobs, invalidateJobsCache } from '../services/jobService';
 import { buildEmailQuery } from '../config/gmail';
 import type { EmailQueryOptions } from '../config/gmail';
 import type { FetchProgress, NewJob } from '../types';
@@ -21,15 +21,17 @@ const initialProgress: FetchProgress = {
 export function useFetchEmails() {
   const [progress, setProgress] = useState<FetchProgress>(initialProgress);
   const [isFetching, setIsFetching] = useState(false);
-  const cancelledRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const stopFetching = useCallback(() => {
-    cancelledRef.current = true;
+    abortRef.current?.abort();
   }, []);
 
   const fetchEmails = useCallback(async (options: FetchEmailsOptions) => {
     const { shouldArchive, ...queryOptions } = options;
-    cancelledRef.current = false;
+    const abort = new AbortController();
+    abortRef.current = abort;
+    const signal = abort.signal;
     setIsFetching(true);
     let newJobsCount = 0;
 
@@ -45,9 +47,9 @@ export function useFetchEmails() {
 
       const emailQuery = buildEmailQuery(queryOptions);
       console.log('[FetchEmails] Query:', emailQuery);
-      const messageIds = await listMessageIds(emailQuery);
+      const messageIds = await listMessageIds(emailQuery, signal);
 
-      if (cancelledRef.current) throw new Error('Stopped');
+      if (signal.aborted) throw new Error('Stopped');
 
       if (messageIds.length === 0) {
         setProgress({
@@ -77,9 +79,9 @@ export function useFetchEmails() {
           total,
           message: `Fetching emails... ${fetched}/${total}`,
         }));
-      });
+      }, signal);
 
-      if (cancelledRef.current) throw new Error('Stopped');
+      if (signal.aborted) throw new Error('Stopped');
 
       // Phase 3: Parse emails
       setProgress({
@@ -93,7 +95,7 @@ export function useFetchEmails() {
       const allJobs: NewJob[] = [];
 
       for (let i = 0; i < messages.length; i++) {
-        if (cancelledRef.current) throw new Error('Stopped');
+        if (signal.aborted) throw new Error('Stopped');
         const message = messages[i];
         const parsedJobs = parseEmail(message);
         const dateReceived = getMessageDate(message);
@@ -113,18 +115,29 @@ export function useFetchEmails() {
         }));
       }
 
-      // Phase 4: Save to Firestore (dedup by URL)
+      // Phase 4: Save to Firestore (dedup by URL + title/company)
       setProgress({
         phase: 'saving',
         current: 0,
         total: allJobs.length,
-        message: `Saving ${allJobs.length} jobs to database...`,
+        message: 'Loading dedup cache...',
         newJobsCount: 0,
       });
 
+      console.log('[FetchEmails] Loading dedup cache...');
+      const existingJobs = await getAllJobs();
+      console.log('[FetchEmails] Dedup cache loaded, existing jobs:', existingJobs.length);
+      const cache = DedupCache.fromJobs(existingJobs);
+      if (signal.aborted) throw new Error('Stopped');
+
+      setProgress(prev => ({
+        ...prev,
+        message: `Saving ${allJobs.length} jobs to database...`,
+      }));
+
       for (let i = 0; i < allJobs.length; i++) {
-        if (cancelledRef.current) throw new Error('Stopped');
-        const result = await addJobIfNotExists(allJobs[i]);
+        if (signal.aborted) throw new Error('Stopped');
+        const result = await addJobIfNotExists(allJobs[i], cache);
         if (result) newJobsCount++;
 
         setProgress(prev => ({
@@ -137,7 +150,7 @@ export function useFetchEmails() {
 
       // Phase 5: Archive fetched emails (conditional)
       if (shouldArchive) {
-        if (cancelledRef.current) throw new Error('Stopped');
+        if (signal.aborted) throw new Error('Stopped');
 
         setProgress({
           phase: 'archiving',
@@ -153,8 +166,11 @@ export function useFetchEmails() {
             current: archived,
             message: `Archiving emails... ${archived}/${total}`,
           }));
-        });
+        }, signal);
       }
+
+      // Invalidate cache so Dashboard picks up newly added jobs
+      if (newJobsCount > 0) invalidateJobsCache();
 
       const archiveMsg = shouldArchive
         ? `, ${messageIds.length} emails archived`
@@ -168,7 +184,7 @@ export function useFetchEmails() {
         newJobsCount,
       });
     } catch (err) {
-      if (cancelledRef.current) {
+      if (signal.aborted) {
         setProgress(prev => ({
           ...prev,
           phase: 'done',

@@ -2,6 +2,13 @@ import type { EmailParser } from './types';
 import type { ParsedJob, GmailMessage } from '../types';
 import { cleanText, cleanUrl, inferType, inferTags, createDomParser } from './utils';
 
+/** Extract the job ID from a LinkedIn job URL for grouping */
+function extractJobKey(href: string): string | null {
+  // URLs like: linkedin.com/comm/jobs/view/1234567890?tracking...
+  const match = href.match(/\/jobs\/view\/(\d+)/);
+  return match ? match[1] : null;
+}
+
 export const linkedinParser: EmailParser = {
   name: 'linkedin',
 
@@ -12,47 +19,59 @@ export const linkedinParser: EmailParser = {
   parse(htmlBody: string, _message: GmailMessage): ParsedJob[] {
     const doc = createDomParser(htmlBody);
     const jobs: ParsedJob[] = [];
-    const seenUrls = new Set<string>();
 
-    // Find title links: <a> with font-size:16px and font-weight:600
     const allLinks = doc.querySelectorAll('a[href*="linkedin.com/comm/jobs/view"]');
 
+    // Group links by job ID — each job has multiple <a> tags with different tracking params
+    const linksByJobId = new Map<string, { links: Element[]; firstHref: string }>();
     allLinks.forEach(link => {
-      const style = link.getAttribute('style') || '';
-      if (!style.includes('font-size:16px') || !style.includes('font-weight:600')) return;
-
       const href = link.getAttribute('href');
       if (!href) return;
+      const jobId = extractJobKey(href);
+      if (!jobId) return;
+      if (!linksByJobId.has(jobId)) {
+        linksByJobId.set(jobId, { links: [], firstHref: href });
+      }
+      linksByJobId.get(jobId)!.links.push(link);
+    });
 
-      const url = cleanUrl(href);
-      if (seenUrls.has(url)) return;
-      seenUrls.add(url);
-
-      const title = cleanText(link.textContent ?? '');
-      if (!title || title.length < 3) return;
-
+    for (const [, { links, firstHref }] of linksByJobId) {
+      let title = '';
       let company = '';
       let location = '';
+      const url = cleanUrl(firstHref);
 
-      // Walk up to find the container table, then find the <p> with company · location
-      const containerTd = link.closest('td');
-      const containerTr = containerTd?.parentElement;
-      const nextTr = containerTr?.nextElementSibling;
+      for (const link of links) {
+        const paragraphs = link.querySelectorAll('p');
 
-      if (nextTr) {
-        const p = nextTr.querySelector('p');
-        if (p) {
-          const text = cleanText(p.textContent ?? '');
-          // Format: "Company · Location"
-          const dotIndex = text.indexOf(' · ');
-          if (dotIndex !== -1) {
-            company = text.substring(0, dotIndex).trim();
-            location = text.substring(dotIndex + 3).trim();
-          } else {
-            company = text;
+        if (paragraphs.length === 0) {
+          // Link with no <p> — its textContent is the job title
+          const text = cleanText(link.textContent ?? '');
+          if (text && text.length >= 5 && !title) {
+            title = text;
           }
+        } else {
+          // Link with <p> elements — contains company/location and hints
+          paragraphs.forEach(p => {
+            const text = cleanText(p.textContent ?? '');
+            if (!text) return;
+
+            // Skip labels
+            if (/^easy\s+apply$/i.test(text)) return;
+            if (/^\d+\s+(school|company|connection|alum|mutual)/i.test(text)) return;
+            if (/^(school alum|alumni|connection|promoted|viewed|new|reposted)$/i.test(text)) return;
+
+            // "Company · Location"
+            if (!company && text.includes(' · ')) {
+              const dotIndex = text.indexOf(' · ');
+              company = text.substring(0, dotIndex).trim();
+              location = text.substring(dotIndex + 3).trim();
+            }
+          });
         }
       }
+
+      if (!title || title.length < 3) continue;
 
       jobs.push({
         title,
@@ -63,7 +82,7 @@ export const linkedinParser: EmailParser = {
         type: inferType(title),
         tags: inferTags(title + ' ' + location),
       });
-    });
+    }
 
     return jobs;
   },

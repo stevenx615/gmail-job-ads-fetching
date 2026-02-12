@@ -28,10 +28,14 @@ export function cleanText(text: string): string {
 const TYPE_KEYWORDS: Record<string, string[]> = {
   developer: [
     'developer', 'software engineer', 'software dev', 'full stack', 'fullstack',
-    'frontend', 'front-end', 'backend', 'back-end', 'web developer',
-    'mobile developer', 'react', 'angular', 'vue', 'node', 'python',
+    'frontend', 'front-end', 'front end engineer', 'backend', 'back-end',
+    'web developer', 'web development', 'mobile developer',
+    'react', 'angular', 'vue', 'node', 'python',
     'java developer', '.net', 'devops', 'cloud engineer', 'sre',
-    'data engineer', 'ml engineer', 'ai engineer',
+    'data engineer', 'ml engineer', 'ai engineer', 'ai architect',
+    'cyber security engineer', 'security engineer', 'vdi engineer',
+    'software implementation', 'développeur',
+    'computer engineer',
   ],
   'game-dev': [
     'game developer', 'game designer', 'game programmer', 'unity', 'unreal',
@@ -42,8 +46,20 @@ const TYPE_KEYWORDS: Record<string, string[]> = {
     'product designer', 'web designer', 'interaction designer',
   ],
   'it-support': [
-    'it support', 'help desk', 'system admin', 'sysadmin', 'network admin',
+    'it support', 'help desk', 'helpdesk', 'system admin', 'sysadmin',
+    'network admin', 'network manager', 'network security',
     'it technician', 'desktop support', 'it specialist', 'it analyst',
+    'it admin', 'it summer', 'it systems', 'it /',
+    'junior it',
+    'service desk', 'application support', 'computer support',
+    'computer operator', 'computer network',
+    'technical support', 'technology support', 'support specialist',
+    'information technology', 'ict systems', 'ingénierie des systèmes tic',
+    'technologies de l\'informatique',
+    'identity and access',
+  ],
+  'data-entry': [
+    'data entry', 'data administrator',
   ],
 };
 

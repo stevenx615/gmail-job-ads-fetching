@@ -10,6 +10,8 @@ export interface Job {
   emailId: string;
   dateReceived: string;
   saved?: boolean;
+  applied?: boolean;
+  read?: boolean;
   createdAt?: unknown;
 }
 

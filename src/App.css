@@ -10,7 +10,7 @@
   --text-dark: #1e293b;
   --text-mid: #475569;
   --text-light: #94a3b8;
-  --accent: #15a349;
+  --accent: #3fa163;
   --accent-hover: #0c7a57;
   --danger: #ef4444;
   --blue: #7495e7;
@@ -72,15 +72,24 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .stat-type-game-dev .stat-value { color: var(--purple); }
 .stat-type-designer .stat-value { color: var(--pink); }
 .stat-type-it-support .stat-value { color: var(--teal); }
+.stat-type-data-entry .stat-value { color: #f59e0b; }
 .stat-type-other .stat-value { color: #d2d9e3; }
 
-.hero-search { display: flex; align-items: center; max-width: 750px; margin: 0 auto; background: #fff; border-radius: 50px; padding: 0.35rem 0.35rem 0.35rem 1.25rem; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
-.hero-input-group { display: flex; align-items: center; gap: 0.6rem; flex: 1; }
+.hero-search { display: flex; align-items: center; max-width: 1000px; width: 100%; margin: 0 auto; background: #fff; border-radius: 50px; padding: 0.35rem 0.35rem 0.35rem 1.25rem; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+.hero-input-group { display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 0; }
+.hero-input-group:first-child { flex: 2; }
 .hero-icon { color: var(--text-light); flex-shrink: 0; }
 .hero-input { border: none; outline: none; font-size: 0.9rem; color: var(--text-dark); width: 100%; background: transparent; padding: 0.5rem 0; }
 .hero-input::placeholder { color: var(--text-light); }
+.hero-location-wrapper { position: relative; }
+.location-dropdown { position: absolute; top: 100%; left: -0.6rem; right: 0; margin-top: 0.5rem; background: #fff; border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-height: 240px; overflow-y: auto; z-index: 50; }
+.location-option { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0.5rem 0.75rem; border: none; background: none; font-size: 0.85rem; color: var(--text-dark); cursor: pointer; text-align: left; text-transform: capitalize; transition: background 0.1s; }
+.location-option:hover { background: var(--body-bg); }
+.location-count { font-size: 0.72rem; color: var(--text-light); background: var(--body-bg); padding: 0.1rem 0.4rem; border-radius: 8px; }
 .hero-divider { width: 1px; height: 28px; background: #e2e8f0; margin: 0 0.75rem; flex-shrink: 0; }
-.hero-search-btn { background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.5rem; border-radius: 50px; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+.hero-clear-btn { background: none; border: none; color: var(--text-light); font-size: 1.2rem; cursor: pointer; padding: 0 0.5rem; line-height: 1; transition: color 0.15s; flex-shrink: 0; }
+.hero-clear-btn:hover { color: var(--danger); }
+.hero-search-btn { background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.5rem; border-radius: 50px; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.15s; flex-shrink: 0; }
 .hero-search-btn:hover { background: var(--accent-hover); }
 
 .hero-tags { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
@@ -112,37 +121,43 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .results-header-left { display: flex; align-items: center; gap: 0.75rem; }
 .results-count { font-size: 1rem; font-weight: 700; color: var(--text-dark); }
 
-.select-page-btn, .delete-selected-btn { padding: 0.3rem 0.7rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; cursor: pointer; border: 1px solid var(--card-border); transition: all 0.15s; }
-.select-page-btn { background: #fff; color: var(--text-mid); }
-.select-page-btn:hover { background: #f8fafc; border-color: var(--accent); color: var(--accent); }
-.delete-selected-btn { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
-.delete-selected-btn:hover { background: #fee2e2; }
+.select-all-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+.delete-selected-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; border: none; background: var(--danger); color: #fff; transition: all 0.15s; }
+.delete-selected-btn:hover:not(:disabled) { background: #dc2626; }
 .delete-selected-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.clear-filters-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-mid); transition: all 0.15s; }
+.clear-filters-btn:hover { border-color: var(--text-mid); color: var(--text-dark); }
 
 .sort-select { padding: 0.45rem 0.75rem; border: 1px solid var(--card-border); border-radius: var(--radius); background: #fff; color: var(--text-mid); font-size: 0.85rem; cursor: pointer; outline: none; }
 
 /* ===== JOB LIST SCROLL ===== */
-.job-list-scroll { flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 3.5rem; }
+.job-list-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 1rem 1rem 3.5rem 0.5rem;}
 .job-cards { display: flex; flex-direction: column; gap: 0.75rem; }
 
 /* ===== JOB CARD ===== */
 .job-card { background: var(--card-bg); border: none; border-radius: var(--radius); padding: 1.25rem; display: flex; gap: 1rem; align-items: flex-start; transition: all 0.15s; box-shadow: var(--card-shadow); }
-.job-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.job-card:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
 .job-card.selected { background: #f0fdf4; box-shadow: 0 0 0 2px var(--accent); }
-
+.job-card.read { opacity: 0.6; color: var(--text-mid); }
+.job-card.read .job-card-title,
+.job-card.read .job-card-company { opacity: 0.75; }
 .job-checkbox { width: 16px; height: 16px; margin-top: 0.25rem; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
 
 .job-card-body { flex: 1; min-width: 0; }
 .job-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .job-card-title-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .job-card-title { font-size: 1.15rem; font-weight: 600; color: var(--text-dark); }
+.job-card-title a { color: var(--text-dark); text-decoration: none; }
+.job-card-title a:hover { color: var(--accent); }
 .job-card-company { font-size: 0.88rem; color: var(--text-mid); margin-top: 0.4rem; }
 
-.type-badge { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: capitalize; white-space: nowrap; }
+.type-badge { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: capitalize; white-space: nowrap; border: none; cursor: pointer; opacity: 0.9; }
+.type-badge:hover { opacity: 1; }
 .badge-developer { background: var(--blue); color: #ffffff; }
 .badge-gamedev { background: var(--purple); color: #fff; }
 .badge-designer { background: var(--pink); color: #fff; }
 .badge-itsupport { background: var(--teal); color: #fff; }
+.badge-dataentry { background: #e7b16f; color: #fff; }
 .badge-other { background: var(--text-light); color: #fff; }
 
 .job-card-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
@@ -150,23 +165,30 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .card-icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .card-btn-save:hover { color: #f59e0b; background: #fffbeb; }
 .card-btn-save.saved { color: #f59e0b; }
-.card-btn-view { color: var(--accent); }
-.card-btn-view:hover { background: #f0fdf4; color: var(--accent-hover); }
+.card-btn-applied:hover { color: var(--accent); background: #f0fdf4; }
+.card-btn-applied.applied { color: var(--accent); }
 .card-btn-copy:hover:not(:disabled) { color: var(--blue); background: #eef2ff; }
 .card-btn-copy.copied { color: var(--accent); background: #f0fdf4; }
 .card-btn-delete:hover { color: var(--danger); background: #fef2f2; }
+.card-btn-read:hover { color: var(--blue); background: #eef2ff; }
+.card-btn-read.read { color: var(--blue); }
 
 .job-card-meta { display: flex; gap: 1.25rem; margin-top: 0.65rem; flex-wrap: wrap; }
 .meta-item { display: flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; color: var(--text-mid); font-weight: 400; }
 .meta-item svg { color: var(--text-light); }
 
 .job-card-tags { display: flex; gap: 0.4rem; margin-top: 0.75rem; flex-wrap: wrap; }
-.source-tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; border: none; text-transform: capitalize; }
+.source-tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; border: none; text-transform: capitalize; cursor: pointer; opacity: 0.9; }
+.source-tag:hover { opacity: 1; }
 .source-linkedin { background: #e9e1ff; color: #8860f6; }
 .source-indeed { background: #dfedfd; color: #4878f1; }
 .source-glassdoor { background: #d9fbe6; color: #1c9f32; }
 .source-other { background: #dadadb; color: #fff; }
-.tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; color: var(--text-mid); border: none; background: #e2e8f0; text-transform: capitalize; }
+.tag { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; color: var(--text-mid); border: none; background: #e2e8f0; text-transform: capitalize; cursor: pointer; opacity: 0.9; }
+.tag:hover { opacity: 1; }
+.applied-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; background: #d9fbe6; color: var(--accent); }
+.repost-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; border: none; cursor: pointer; background: #fef2f2; color: var(--danger); transition: all 0.15s; }
+.repost-badge:hover { background: #fee2e2; }
 
 /* ===== STATES ===== */
 .state-message { display: flex; align-items: center; justify-content: center; flex: 1; font-size: 1rem; color: var(--text-mid); padding: 3rem; }
@@ -174,7 +196,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .empty-state { text-align: center; padding: 3rem; color: var(--text-light); background: var(--card-bg); border-radius: var(--radius); border: 2px dashed var(--card-border); }
 
 /* ===== PAGINATION ===== */
-.pagination { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 1.5rem; padding: 0.75rem 1rem; background: #fff; border-top: 1px solid var(--card-border); z-index: 10; box-shadow: 0 -2px 8px rgba(0,0,0,0.04); }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 1.5rem; padding: 0.75rem 1rem; flex-shrink: 0; }
 .page-nav { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.5rem; background: none; border: none; color: var(--text-mid); font-size: 0.85rem; cursor: pointer; transition: color 0.15s; }
 .page-nav:hover:not(:disabled) { color: var(--text-dark); }
 .page-nav:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -209,6 +231,11 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .modal-row { flex-direction: row; gap: 1rem; }
 .modal-field { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
 
+.modal-date-quick { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.modal-date-quick-btn { padding: 0.3rem 0.7rem; border-radius: 20px; font-size: 0.78rem; font-weight: 500; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
+.modal-date-quick-btn:hover { border-color: var(--accent); color: var(--accent); }
+.modal-date-quick-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.modal-date-quick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .modal-date-row { display: flex; align-items: center; gap: 0.5rem; }
 .modal-date-row .modal-input { flex: 1; }
 .modal-date-sep { color: var(--text-light); font-size: 0.85rem; }

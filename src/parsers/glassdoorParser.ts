@@ -26,26 +26,44 @@ export const glassdoorParser: EmailParser = {
       if (seenUrls.has(url)) return;
       seenUrls.add(url);
 
+      // Collect all paragraph texts in order
       const paragraphs = link.querySelectorAll('p');
       let title = '';
-      let company = '';
-      let location = '';
+      const otherTexts: string[] = [];
 
       paragraphs.forEach(p => {
         const style = p.getAttribute('style') || '';
         const text = cleanText(p.textContent ?? '');
         if (!text) return;
 
-        if (style.includes('font-weight:600') && style.includes('font-size:14px')) {
+        // Title is the bold/large one
+        if (!title && style.includes('font-weight:600')) {
           title = text;
-        } else if (!title && style.includes('font-size:12px') && style.includes('font-weight:400') && !style.includes('color:#')) {
-          company = text;
-        } else if (style.includes('margin-top:4px')) {
-          location = text;
+        } else {
+          otherTexts.push(text);
         }
       });
 
       if (!title || title.length < 3) return;
+
+      // Classify remaining texts by content, not style
+      let company = '';
+      let location = '';
+
+      for (const text of otherTexts) {
+        // Skip ratings like "3.5", "4.2", "3.9 ★"
+        if (/^\d(\.\d)?\s*[★☆]?$/.test(text.trim())) continue;
+        // Skip salary patterns like "$50K - $80K", "$20 Per Hour", "CA$60K"
+        if (/[\$€£]|per\s+hour|salary|estimate/i.test(text)) continue;
+        // Skip "Easy Apply" or action labels
+        if (/^easy\s+apply$/i.test(text.trim())) continue;
+
+        if (!company) {
+          company = text;
+        } else if (!location) {
+          location = text;
+        }
+      }
 
       jobs.push({
         title,

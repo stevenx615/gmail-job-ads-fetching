@@ -11,9 +11,15 @@ interface FetchEmailsPanelProps {
 
 const SYSTEM_FOLDERS = ['INBOX', 'SENT', 'TRASH', 'SPAM', 'DRAFT', 'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'];
 
+function toLocalDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function getTodayString(): string {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
+  return toLocalDateString(new Date());
 }
 
 function formatFolderName(id: string): string {
@@ -28,13 +34,17 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
   const { progress, isFetching, fetchEmails, stopFetching } = useFetchEmails();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [senders, setSenders] = useState<string[]>([...DEFAULT_SENDERS]);
+  const [senders, setSenders] = useState<string[]>(() => {
+    const saved = localStorage.getItem('fetchSenders');
+    return saved ? JSON.parse(saved) : [...DEFAULT_SENDERS];
+  });
   const [newSender, setNewSender] = useState('');
   const [afterDate, setAfterDate] = useState(getTodayString);
   const [beforeDate, setBeforeDate] = useState(getTodayString);
   const [folder, setFolder] = useState('INBOX');
   const [label, setLabel] = useState('');
   const [shouldArchive, setShouldArchive] = useState(true);
+  const [unreadOnly, setUnreadOnly] = useState(true);
 
   const [labels, setLabels] = useState<GmailLabel[]>([]);
   const [labelsLoaded, setLabelsLoaded] = useState(false);
@@ -59,16 +69,21 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
   const folderLabels = labels.filter(l => SYSTEM_FOLDERS.includes(l.id));
   const userLabels = labels.filter(l => l.type === 'user');
 
+  const updateSenders = (newList: string[]) => {
+    setSenders(newList);
+    localStorage.setItem('fetchSenders', JSON.stringify(newList));
+  };
+
   const handleAddSender = () => {
     const trimmed = newSender.trim().toLowerCase();
     if (trimmed && !senders.includes(trimmed)) {
-      setSenders(prev => [...prev, trimmed]);
+      updateSenders([...senders, trimmed]);
       setNewSender('');
     }
   };
 
   const handleRemoveSender = (email: string) => {
-    setSenders(prev => prev.filter(s => s !== email));
+    updateSenders(senders.filter(s => s !== email));
   };
 
   const handleSenderKeyDown = (e: React.KeyboardEvent) => {
@@ -98,6 +113,7 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
       label: label || undefined,
       folder: folder || undefined,
       shouldArchive,
+      unreadOnly,
     });
     onFetchComplete();
   };
@@ -176,6 +192,25 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
               {/* Date Range */}
               <div className="modal-section">
                 <label className="modal-label">Date Range</label>
+                <div className="modal-date-quick">
+                  {([['Today', 0], ['Last 7 Days', 7], ['Last 30 Days', 30]] as const).map(([label, days]) => {
+                    const d = new Date();
+                    const end = getTodayString();
+                    const start = days === 0 ? end : toLocalDateString(new Date(d.getFullYear(), d.getMonth(), d.getDate() - days));
+                    const isActive = afterDate === start && beforeDate === end;
+                    return (
+                      <button
+                        key={label}
+                        className={`modal-date-quick-btn ${isActive ? 'active' : ''}`}
+                        onClick={() => { setAfterDate(start); setBeforeDate(end); }}
+                        disabled={isFetching}
+                        type="button"
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="modal-date-row">
                   <input
                     type="date"
@@ -231,8 +266,17 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
                 </div>
               </div>
 
-              {/* Archive checkbox */}
+              {/* Options checkboxes */}
               <div className="modal-section">
+                <label className="modal-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={unreadOnly}
+                    onChange={e => setUnreadOnly(e.target.checked)}
+                    disabled={isFetching}
+                  />
+                  Unread emails only
+                </label>
                 <label className="modal-checkbox-label">
                   <input
                     type="checkbox"
