@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getAllJobs, getUnreadJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus } from '../services/jobService';
+import { getUnreadJobs, getReadJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus } from '../services/jobService';
 import type { Job } from '../types';
 
 interface DashboardProps {
@@ -24,11 +24,11 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const jobListRef = useRef<HTMLDivElement>(null);
   const pageSize = 20;
 
-  const loadJobs = useCallback(async (forceRefresh = false) => {
+  const loadJobs = useCallback(async () => {
     setLoading(true);
     try {
       const data = showReadJobs
-        ? await getAllJobs(forceRefresh)
+        ? await getReadJobs()
         : await getUnreadJobs();
       setJobs(data);
       setError(null);
@@ -41,15 +41,11 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   }, [showReadJobs]);
 
   const refreshTriggerRef = useRef(refreshTrigger);
-  const showReadJobsRef = useRef(showReadJobs);
   useEffect(() => {
-    // Force refresh when showReadJobs changes (toggling between unread/all views)
-    // Also force refresh when refreshTrigger changes (after email fetch)
-    const forceRefresh = refreshTriggerRef.current !== refreshTrigger || showReadJobsRef.current !== showReadJobs;
+    // Load jobs when refreshTrigger or showReadJobs changes
     refreshTriggerRef.current = refreshTrigger;
-    showReadJobsRef.current = showReadJobs;
-    loadJobs(forceRefresh);
-  }, [loadJobs, refreshTrigger, showReadJobs]);
+    loadJobs();
+  }, [loadJobs, refreshTrigger]);
 
   const sources = useMemo(() => {
     const srcSet = new Set<string>();
@@ -364,10 +360,10 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
           <button
             className={`saved-filter-btn ${showReadJobs ? 'active' : ''}`}
             onClick={() => setShowReadJobs(f => !f)}
-            title={showReadJobs ? 'Showing all jobs (including read)' : 'Showing unread jobs only'}
+            title={showReadJobs ? 'Showing read jobs only' : 'Showing unread jobs only'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill={showReadJobs ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>{showReadJobs ? 'Show Unread Only' : 'Show Read Jobs'}</span>
+            <span>Show Read Jobs</span>
           </button>
 
           <div className="filter-section">

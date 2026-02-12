@@ -85,6 +85,48 @@ export async function getUnreadJobs(): Promise<Job[]> {
   }
 }
 
+/**
+ * Fetches read jobs from Firestore, filtered client-side.
+ * Returns only jobs where read === true.
+ * @returns Array of read jobs with normalized fields, or empty array on error
+ */
+export async function getReadJobs(): Promise<Job[]> {
+  try {
+    // Fetch all jobs with simple query (no composite index needed)
+    const jobsCollection = collection(db, COLLECTION_NAME);
+    const q = query(jobsCollection, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+
+    // Filter client-side to get only read jobs
+    const jobs: Job[] = snapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title || '',
+          company: data.company || '',
+          location: data.location || '',
+          url: truncateUrl(data.url || ''),
+          source: (data.source || 'generic').toLowerCase() as Job['source'],
+          type: (data.type || '').toLowerCase(),
+          tags: data.tags || [],
+          saved: data.saved || false,
+          applied: data.applied || false,
+          read: data.read || false,
+          emailId: data.emailId,
+          dateReceived: data.dateReceived?.toDate?.() || new Date(),
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+        };
+      })
+      .filter(job => job.read); // Keep only read jobs
+
+    return jobs;
+  } catch (error) {
+    console.error('Error fetching read jobs:', error);
+    return [];
+  }
+}
+
 export function invalidateJobsCache(): void {
   jobsCache = null;
 }
