@@ -52,7 +52,8 @@ export async function getUnreadJobs(): Promise<Job[]> {
   try {
     const q = query(
       collection(db, COLLECTION_NAME),
-      where('read', '==', false),
+      where('read', '!=', true),
+      orderBy('read'),
       orderBy('createdAt', 'desc')
     );
 
