@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getAllJobs, deleteJob, toggleJobSaved } from '../services/jobService';
+import { getAllJobs, getUnreadJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus } from '../services/jobService';
 import type { Job } from '../types';
 
 interface DashboardProps {
@@ -16,19 +16,21 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [savedFilter, setSavedFilter] = useState(false);
   const [sortBy, setSortBy] = useState('date-desc');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [showReadJobs, setShowReadJobs] = useState(false);
   const jobListRef = useRef<HTMLDivElement>(null);
   const pageSize = 20;
 
   const loadJobs = useCallback(async (forceRefresh = false) => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const fetchedJobs = await getAllJobs(forceRefresh);
-      setJobs(fetchedJobs);
+      const data = showReadJobs
+        ? await getAllJobs(forceRefresh)
+        : await getUnreadJobs();
+      setJobs(data);
       setError(null);
     } catch (err) {
       console.error('Error loading jobs:', err);
@@ -36,7 +38,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showReadJobs]);
 
   const refreshTriggerRef = useRef(refreshTrigger);
   useEffect(() => {
@@ -187,14 +189,6 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     finally { setIsDeleting(false); }
   };
 
-  const handleCopy = async (job: Job) => {
-    if (job.url) {
-      await navigator.clipboard.writeText(job.url);
-      setCopiedId(job.id);
-      setTimeout(() => setCopiedId(null), 2000);
-    }
-  };
-
   const handleDelete = async (id: string) => {
     await deleteJob(id);
     setJobs(prev => prev.filter(j => j.id !== id));
@@ -206,6 +200,32 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     const newSaved = !job.saved;
     await toggleJobSaved(id, newSaved);
     setJobs(prev => prev.map(j => j.id === id ? { ...j, saved: newSaved } : j));
+  };
+
+  const handleApplied = async (id: string) => {
+    const job = jobs.find(j => j.id === id);
+    if (!job) return;
+    const newApplied = !job.applied;
+    await toggleJobApplied(id, newApplied);
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, applied: newApplied } : j));
+  };
+
+  const toggleRead = async (jobId: string, read: boolean) => {
+    // Store original jobs state for rollback on error
+    const originalJobs = jobs;
+
+    // Update local state optimistically
+    setJobs(jobs.map(j =>
+      j.id === jobId ? { ...j, read } : j
+    ));
+
+    try {
+      await toggleJobReadStatus(jobId, read);
+    } catch (error) {
+      console.error('Error toggling read status:', error);
+      // Rollback to original state on error
+      setJobs(originalJobs);
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -338,6 +358,14 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
             <span className="filter-count">{savedCount}</span>
           </button>
 
+          <button
+            className={`saved-filter-btn ${showReadJobs ? 'active' : ''}`}
+            onClick={() => setShowReadJobs(f => !f)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill={showReadJobs ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>{showReadJobs ? 'All Jobs' : 'Unread Only'}</span>
+          </button>
+
           <div className="filter-section">
             <h4 className="filter-heading">Source</h4>
             <label className="filter-radio">
@@ -419,7 +447,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
             ) : (
               <div className="job-cards">
                 {paginatedJobs.map(job => (
-                  <div key={job.id} className={`job-card ${selectedIds.has(job.id) ? 'selected' : ''}`}>
+                  <div key={job.id} className={`job-card ${selectedIds.has(job.id) ? 'selected' : ''} ${job.read ? 'read' : ''}`}>
                     <input
                       type="checkbox"
                       className="job-checkbox"
@@ -440,21 +468,29 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                           >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill={job.saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
                           </button>
-                          {job.url && (
-                            <a href={job.url} target="_blank" rel="noopener noreferrer" className="card-icon-btn card-btn-view" title="Open link">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                            </a>
-                          )}
                           <button
-                            className={`card-icon-btn card-btn-copy ${copiedId === job.id ? 'copied' : ''}`}
-                            onClick={() => handleCopy(job)}
-                            disabled={!job.url}
-                            title={copiedId === job.id ? 'Copied!' : 'Copy link'}
+                            className={`card-icon-btn card-btn-applied ${job.applied ? 'applied' : ''}`}
+                            onClick={() => handleApplied(job.id)}
+                            title={job.applied ? 'Mark as not applied' : 'Mark as applied'}
                           >
-                            {copiedId === job.id
-                              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
-                              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                            }
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill={job.applied ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M7.3,11.4,10.1,3a.6.6,0,0,1,.8-.3l1,.5a2.6,2.6,0,0,1,1.4,2.3V9.4h6.4a2,2,0,0,1,1.9,2.5l-2,8a2,2,0,0,1-1.9,1.5H4.3a2,2,0,0,1-2-2v-6a2,2,0,0,1,2-2h3v10"/></svg>
+                          </button>
+                          <button
+                            className={`card-icon-btn card-btn-read ${job.read ? 'read' : ''}`}
+                            onClick={() => toggleRead(job.id, !job.read)}
+                            title={job.read ? 'Mark as unread' : 'Mark as read'}
+                            aria-label={job.read ? 'Mark job as unread' : 'Mark job as read'}
+                          >
+                            {job.read ? (
+                              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-4.803m5.596-3.856a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0M15.232 5.027a9.97 9.97 0 011.563 4.803m12.768 0a9.964 9.964 0 01-1.563 4.803" />
+                              </svg>
+                            ) : (
+                              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                            )}
                           </button>
                           <button className="card-icon-btn card-btn-delete" onClick={() => handleDelete(job.id)} title="Delete">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -474,6 +510,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                         </span>
                       </div>
                       <div className="job-card-tags">
+                        {job.applied && (
+                          <span className="applied-badge">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2"><path d="M7.3,11.4,10.1,3a.6.6,0,0,1,.8-.3l1,.5a2.6,2.6,0,0,1,1.4,2.3V9.4h6.4a2,2,0,0,1,1.9,2.5l-2,8a2,2,0,0,1-1.9,1.5H4.3a2,2,0,0,1-2-2v-6a2,2,0,0,1,2-2h3v10"/></svg>
+                            Applied
+                          </span>
+                        )}
                         {job.source && (
                           <button className={`source-tag ${getSourceBadgeClass(job.source)}`} onClick={() => setSourceFilter(job.source)}>
                             {job.source}

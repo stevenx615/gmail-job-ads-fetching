@@ -6,6 +6,7 @@ import {
   updateDoc,
   doc,
   query,
+  where,
   orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -17,6 +18,13 @@ const COLLECTION_NAME = 'jobs';
 // In-memory cache to avoid redundant Firestore reads
 let jobsCache: Job[] | null = null;
 
+/**
+ * Fetches all jobs from Firestore, ordered by creation date (newest first).
+ * Uses in-memory cache to avoid redundant reads unless forced to refresh.
+ * Normalizes source and type fields to lowercase for consistent filtering.
+ * @param forceRefresh - If true, bypasses cache and re-fetches from Firestore
+ * @returns Array of all jobs with normalized fields
+ */
 export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
   if (jobsCache && !forceRefresh) return jobsCache;
 
@@ -28,11 +36,54 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
     return {
       id: d.id,
       ...data,
-      source: (data.source || '').toLowerCase(),
+      source: (data.source || 'generic').toLowerCase() as Job['source'],
       type: (data.type || '').toLowerCase(),
     };
   }) as Job[];
   return jobsCache;
+}
+
+/**
+ * Fetches unread jobs from Firestore, ordered by date received (newest first).
+ * Applies the same field normalization as getAllJobs() for consistency.
+ * @returns Array of unread jobs with normalized fields, or empty array on error
+ */
+export async function getUnreadJobs(): Promise<Job[]> {
+  try {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where('read', '==', false),
+      orderBy('dateReceived', 'desc')
+    );
+
+    const snapshot = await getDocs(q);
+    const jobs: Job[] = [];
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      jobs.push({
+        id: doc.id,
+        title: data.title || '',
+        company: data.company || '',
+        location: data.location || '',
+        url: truncateUrl(data.url || ''),
+        source: (data.source || 'generic').toLowerCase() as Job['source'],
+        type: (data.type || '').toLowerCase(),
+        tags: data.tags || [],
+        saved: data.saved || false,
+        applied: data.applied || false,
+        read: data.read || false,
+        emailId: data.emailId,
+        dateReceived: data.dateReceived,
+        createdAt: data.createdAt,
+      });
+    });
+
+    return jobs;
+  } catch (error) {
+    console.error('Error fetching unread jobs:', error);
+    return [];
+  }
 }
 
 export function invalidateJobsCache(): void {
@@ -62,6 +113,22 @@ export async function toggleJobSaved(id: string, saved: boolean): Promise<void> 
   await updateDoc(jobDoc, { saved });
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === id ? { ...j, saved } : j);
+  }
+}
+
+export async function toggleJobApplied(id: string, applied: boolean): Promise<void> {
+  const jobDoc = doc(db, COLLECTION_NAME, id);
+  await updateDoc(jobDoc, { applied });
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => j.id === id ? { ...j, applied } : j);
+  }
+}
+
+export async function toggleJobReadStatus(jobId: string, read: boolean): Promise<void> {
+  const jobDoc = doc(db, COLLECTION_NAME, jobId);
+  await updateDoc(jobDoc, { read });
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => j.id === jobId ? { ...j, read } : j);
   }
 }
 
