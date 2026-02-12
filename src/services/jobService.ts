@@ -6,7 +6,6 @@ import {
   updateDoc,
   doc,
   query,
-  where,
   orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -44,41 +43,40 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
 }
 
 /**
- * Fetches unread jobs from Firestore, ordered by date received (newest first).
- * Applies the same field normalization as getAllJobs() for consistency.
+ * Fetches unread jobs from Firestore, filtered client-side.
+ * Fetches all jobs and returns only those where read !== true.
+ * This includes jobs without the read field (backward compatible with old data).
  * @returns Array of unread jobs with normalized fields, or empty array on error
  */
 export async function getUnreadJobs(): Promise<Job[]> {
   try {
-    const q = query(
-      collection(db, COLLECTION_NAME),
-      where('read', '!=', true),
-      orderBy('read'),
-      orderBy('createdAt', 'desc')
-    );
-
+    // Fetch all jobs with simple query (no composite index needed)
+    const jobsCollection = collection(db, COLLECTION_NAME);
+    const q = query(jobsCollection, orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
-    const jobs: Job[] = [];
 
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      jobs.push({
-        id: doc.id,
-        title: data.title || '',
-        company: data.company || '',
-        location: data.location || '',
-        url: truncateUrl(data.url || ''),
-        source: (data.source || 'generic').toLowerCase() as Job['source'],
-        type: (data.type || '').toLowerCase(),
-        tags: data.tags || [],
-        saved: data.saved || false,
-        applied: data.applied || false,
-        read: data.read || false,
-        emailId: data.emailId,
-        dateReceived: data.dateReceived,
-        createdAt: data.createdAt,
-      });
-    });
+    // Filter client-side to get only unread jobs
+    const jobs: Job[] = snapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title || '',
+          company: data.company || '',
+          location: data.location || '',
+          url: truncateUrl(data.url || ''),
+          source: (data.source || 'generic').toLowerCase() as Job['source'],
+          type: (data.type || '').toLowerCase(),
+          tags: data.tags || [],
+          saved: data.saved || false,
+          applied: data.applied || false,
+          read: data.read || false,
+          emailId: data.emailId,
+          dateReceived: data.dateReceived?.toDate?.() || new Date(),
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+        };
+      })
+      .filter(job => !job.read); // Keep only unread jobs (includes missing read field)
 
     return jobs;
   } catch (error) {
