@@ -53,7 +53,7 @@ export async function getUnreadJobs(): Promise<Job[]> {
     const q = query(
       collection(db, COLLECTION_NAME),
       where('read', '==', false),
-      orderBy('dateReceived', 'desc')
+      orderBy('createdAt', 'desc')
     );
 
     const snapshot = await getDocs(q);
