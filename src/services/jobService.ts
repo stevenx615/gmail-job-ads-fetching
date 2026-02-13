@@ -10,12 +10,44 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import type { Job, NewJob } from '../types';
+import type { Job, JobBadges, NewJob } from '../types';
 
 const COLLECTION_NAME = 'jobs';
 
 // In-memory cache to avoid redundant Firestore reads
 let jobsCache: Job[] | null = null;
+
+// Stable order cache in localStorage
+const ORDER_CACHE_KEY = 'jobs_stable_order';
+
+function getStableOrder(): string[] {
+  try {
+    const stored = localStorage.getItem(ORDER_CACHE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setStableOrder(ids: string[]): void {
+  try {
+    localStorage.setItem(ORDER_CACHE_KEY, JSON.stringify(ids));
+  } catch (e) {
+    console.warn('[jobService] Failed to save stable order to localStorage:', e);
+  }
+}
+
+function applyStableOrder(jobs: Job[]): Job[] {
+  const stableOrder = getStableOrder();
+  if (stableOrder.length === 0) return jobs;
+
+  const orderMap = new Map(stableOrder.map((id, index) => [id, index]));
+  return [...jobs].sort((a, b) => {
+    const aIndex = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+    const bIndex = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+    return aIndex - bIndex;
+  });
+}
 
 /**
  * Fetches all jobs from Firestore, ordered by creation date (newest first).
@@ -25,60 +57,67 @@ let jobsCache: Job[] | null = null;
  * @returns Array of all jobs with normalized fields
  */
 export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
-  if (jobsCache && !forceRefresh) return jobsCache;
+  if (jobsCache && !forceRefresh) {
+    console.log('[jobService] Returning cached jobs:', jobsCache.length);
+    return jobsCache;
+  }
 
+  console.log('[jobService] Fetching jobs from Firestore...');
   const jobsCollection = collection(db, COLLECTION_NAME);
   const q = query(jobsCollection, orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
-  jobsCache = snapshot.docs.map(d => {
+  const fetchedJobs = snapshot.docs.map(d => {
     const data = d.data();
     return {
       id: d.id,
-      ...data,
+      title: data.title || '',
+      company: data.company || '',
+      location: data.location || '',
+      url: truncateUrl(data.url || ''),
       source: (data.source || 'generic').toLowerCase() as Job['source'],
       type: (data.type || '').toLowerCase(),
+      tags: data.tags || [],
+      saved: data.saved || false,
+      applied: data.applied || false,
+      read: data.read || false,
+      badges: data.badges || undefined,
+      emailId: data.emailId,
+      dateReceived: data.dateReceived?.toDate?.() || new Date(),
+      createdAt: data.createdAt?.toDate?.() || new Date(),
     };
   }) as Job[];
+
+  console.log('[jobService] First 5 job IDs from Firestore:', fetchedJobs.slice(0, 5).map(j => j.id));
+
+  // Apply stable order from localStorage, or save current order if none exists
+  const stableOrder = getStableOrder();
+  console.log('[jobService] Stable order exists:', stableOrder.length > 0, 'count:', stableOrder.length);
+
+  if (stableOrder.length === 0 || stableOrder.length !== fetchedJobs.length) {
+    // First time or job count changed - save the current Firestore order
+    console.log('[jobService] Saving new stable order');
+    setStableOrder(fetchedJobs.map(j => j.id));
+    jobsCache = fetchedJobs;
+  } else {
+    // Apply the stable order
+    console.log('[jobService] Applying stable order');
+    jobsCache = applyStableOrder(fetchedJobs);
+  }
+
+  console.log('[jobService] First 5 job IDs after ordering:', jobsCache.slice(0, 5).map(j => j.id));
+  console.log('[jobService] Fetched and cached jobs:', jobsCache.length);
   return jobsCache;
 }
 
 /**
  * Fetches unread jobs from Firestore, filtered client-side.
- * Fetches all jobs and returns only those where read !== true.
- * This includes jobs without the read field (backward compatible with old data).
+ * Uses cached data when available for consistent ordering.
  * @returns Array of unread jobs with normalized fields, or empty array on error
  */
 export async function getUnreadJobs(): Promise<Job[]> {
   try {
-    // Fetch all jobs with simple query (no composite index needed)
-    const jobsCollection = collection(db, COLLECTION_NAME);
-    const q = query(jobsCollection, orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-
-    // Filter client-side to get only unread jobs
-    const jobs: Job[] = snapshot.docs
-      .map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          title: data.title || '',
-          company: data.company || '',
-          location: data.location || '',
-          url: truncateUrl(data.url || ''),
-          source: (data.source || 'generic').toLowerCase() as Job['source'],
-          type: (data.type || '').toLowerCase(),
-          tags: data.tags || [],
-          saved: data.saved || false,
-          applied: data.applied || false,
-          read: data.read || false,
-          emailId: data.emailId,
-          dateReceived: data.dateReceived?.toDate?.() || new Date(),
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-        };
-      })
-      .filter(job => !job.read); // Keep only unread jobs (includes missing read field)
-
-    return jobs;
+    const allJobs = await getAllJobs();
+    return allJobs.filter(job => !job.read);
   } catch (error) {
     console.error('Error fetching unread jobs:', error);
     return [];
@@ -87,40 +126,13 @@ export async function getUnreadJobs(): Promise<Job[]> {
 
 /**
  * Fetches read jobs from Firestore, filtered client-side.
- * Returns only jobs where read === true.
+ * Uses cached data when available for consistent ordering.
  * @returns Array of read jobs with normalized fields, or empty array on error
  */
 export async function getReadJobs(): Promise<Job[]> {
   try {
-    // Fetch all jobs with simple query (no composite index needed)
-    const jobsCollection = collection(db, COLLECTION_NAME);
-    const q = query(jobsCollection, orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-
-    // Filter client-side to get only read jobs
-    const jobs: Job[] = snapshot.docs
-      .map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          title: data.title || '',
-          company: data.company || '',
-          location: data.location || '',
-          url: truncateUrl(data.url || ''),
-          source: (data.source || 'generic').toLowerCase() as Job['source'],
-          type: (data.type || '').toLowerCase(),
-          tags: data.tags || [],
-          saved: data.saved || false,
-          applied: data.applied || false,
-          read: data.read || false,
-          emailId: data.emailId,
-          dateReceived: data.dateReceived?.toDate?.() || new Date(),
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-        };
-      })
-      .filter(job => job.read); // Keep only read jobs
-
-    return jobs;
+    const allJobs = await getAllJobs();
+    return allJobs.filter(job => job.read);
   } catch (error) {
     console.error('Error fetching read jobs:', error);
     return [];
@@ -128,7 +140,14 @@ export async function getReadJobs(): Promise<Job[]> {
 }
 
 export function invalidateJobsCache(): void {
+  console.log('[jobService] Cache invalidated');
   jobsCache = null;
+  // Clear stable order so new jobs get incorporated in the next fetch
+  try {
+    localStorage.removeItem(ORDER_CACHE_KEY);
+  } catch (e) {
+    console.warn('[jobService] Failed to clear stable order:', e);
+  }
 }
 
 export async function addJob(jobData: NewJob): Promise<string> {
@@ -170,6 +189,14 @@ export async function toggleJobReadStatus(jobId: string, read: boolean): Promise
   await updateDoc(jobDoc, { read });
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === jobId ? { ...j, read } : j);
+  }
+}
+
+export async function updateJobBadges(id: string, badges: JobBadges): Promise<void> {
+  const jobDoc = doc(db, COLLECTION_NAME, id);
+  await updateDoc(jobDoc, { badges });
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => j.id === id ? { ...j, badges } : j);
   }
 }
 

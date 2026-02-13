@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getUnreadJobs, getReadJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus } from '../services/jobService';
-import type { Job } from '../types';
+import { getUnreadJobs, getReadJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges } from '../services/jobService';
+import { BadgeSelector } from './BadgeSelector';
+import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
+import type { Job, JobBadges } from '../types';
 
 interface DashboardProps {
   refreshTrigger: number;
@@ -15,12 +17,13 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [savedFilter, setSavedFilter] = useState(false);
-  const [sortBy, setSortBy] = useState('date-desc');
+  const [sortBy, setSortBy] = useState('none');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
   const [showReadJobs, setShowReadJobs] = useState(false);
+  const [badgeSelectorOpenId, setBadgeSelectorOpenId] = useState<string | null>(null);
   const jobListRef = useRef<HTMLDivElement>(null);
   const pageSize = 20;
 
@@ -132,14 +135,31 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
       );
     }
     result.sort((a, b) => {
+      let comparison = 0;
       switch (sortBy) {
-        case 'date-desc': return new Date(b.dateReceived || 0).getTime() - new Date(a.dateReceived || 0).getTime();
-        case 'date-asc': return new Date(a.dateReceived || 0).getTime() - new Date(b.dateReceived || 0).getTime();
-        case 'title-asc': return (a.title || '').localeCompare(b.title || '');
-        case 'title-desc': return (b.title || '').localeCompare(a.title || '');
-        case 'company-asc': return (a.company || '').localeCompare(b.company || '');
-        default: return 0;
+        case 'none':
+          // Preserve original order from Firestore
+          return 0;
+        case 'date-desc':
+          comparison = new Date(b.dateReceived || 0).getTime() - new Date(a.dateReceived || 0).getTime();
+          break;
+        case 'date-asc':
+          comparison = new Date(a.dateReceived || 0).getTime() - new Date(b.dateReceived || 0).getTime();
+          break;
+        case 'title-asc':
+          comparison = (a.title || '').localeCompare(b.title || '');
+          break;
+        case 'title-desc':
+          comparison = (b.title || '').localeCompare(a.title || '');
+          break;
+        case 'company-asc':
+          comparison = (a.company || '').localeCompare(b.company || '');
+          break;
+        default:
+          comparison = 0;
       }
+      // Secondary sort by id for stable ordering when primary values are equal
+      return comparison !== 0 ? comparison : a.id.localeCompare(b.id);
     });
     return result;
   }, [jobs, savedFilter, typeFilter, sourceFilter, locationSearch, searchTerm, sortBy]);
@@ -224,6 +244,28 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
       console.error('Error toggling read status:', error);
       // Rollback to original state on error
       setJobs(originalJobs);
+    }
+  };
+
+  const handleBadgeConfirm = async (jobId: string, badges: JobBadges) => {
+    const originalJobs = jobs;
+    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, badges } : j));
+    setBadgeSelectorOpenId(null);
+    try {
+      await updateJobBadges(jobId, badges);
+    } catch (error) {
+      console.error('Error saving badges:', error);
+      setJobs(originalJobs);
+    }
+  };
+
+  const getBadgeCategoryClass = (key: string) => {
+    switch (key) {
+      case 'responsibilities': return 'badge-cat-resp';
+      case 'qualifications': return 'badge-cat-qual';
+      case 'skills': return 'badge-cat-skill';
+      case 'benefits': return 'badge-cat-bene';
+      default: return '';
     }
   };
 
@@ -331,7 +373,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
         </div>
         <div className="hero-tags">
           <span className="hero-tags-label">Popular:</span>
-          {['junior', 'entry level', 'intern', 'remote', 'developer', 'it support'].map(tag => (
+          {['junior', 'entry level', 'intern', 'remote', 'developer', 'it support', 'winnipeg'].map(tag => (
             <button
               key={tag}
               className={`hero-tag ${searchTerm.toLowerCase() === tag ? 'active' : ''}`}
@@ -428,6 +470,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
               )}
             </div>
             <select className="sort-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              <option value="none">Default Order</option>
               <option value="date-desc">Most Recent</option>
               <option value="date-asc">Oldest First</option>
               <option value="title-asc">Title A-Z</option>
@@ -524,6 +567,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                         {job.type && (
                           <button className={`type-badge ${getTypeBadgeClass(job.type)}`} onClick={() => setTypeFilter(job.type)}>{job.type}</button>
                         )}
+                        {job.badges && BADGE_CATEGORIES.map(cat => {
+                          const items = job.badges?.[cat.key as keyof JobBadges] || [];
+                          return items.map(badge => (
+                            <span key={`${cat.key}-${badge}`} className={`category-badge ${getBadgeCategoryClass(cat.key)}`}>{badge}</span>
+                          ));
+                        })}
                         {job.tags?.map(tag => (
                           <button key={tag} className="tag" onClick={() => setSearchTerm(tag)}>{tag}</button>
                         ))}
@@ -537,7 +586,22 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                             {getRepostCount(job)}x
                           </button>
                         )}
+                        <button
+                          className="card-btn-badge-add"
+                          onClick={() => setBadgeSelectorOpenId(prev => prev === job.id ? null : job.id)}
+                          title="Add badges"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
                       </div>
+                      {badgeSelectorOpenId === job.id && (
+                        <BadgeSelector
+                          badges={job.badges || { responsibilities: [], qualifications: [], skills: [], benefits: [] }}
+                          jobType={job.type}
+                          onConfirm={(badges) => handleBadgeConfirm(job.id, badges)}
+                          onCancel={() => setBadgeSelectorOpenId(null)}
+                        />
+                      )}
                     </div>
                   </div>
                 ))}
