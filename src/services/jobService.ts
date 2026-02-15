@@ -82,7 +82,7 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
       read: data.read || false,
       badges: data.badges || undefined,
       emailId: data.emailId,
-      dateReceived: data.dateReceived?.toDate?.() || new Date(),
+      dateReceived: data.dateReceived?.toDate ? data.dateReceived.toDate().toISOString() : (data.dateReceived || new Date().toISOString()),
       createdAt: data.createdAt?.toDate?.() || new Date(),
     };
   }) as Job[];
@@ -198,6 +198,59 @@ export async function updateJobBadges(id: string, badges: JobBadges): Promise<vo
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === id ? { ...j, badges } : j);
   }
+}
+
+// Bulk operations for settings page
+export async function deleteAllJobs(): Promise<number> {
+  const allJobs = await getAllJobs();
+  for (const job of allJobs) {
+    await deleteDoc(doc(db, COLLECTION_NAME, job.id));
+  }
+  const count = allJobs.length;
+  invalidateJobsCache();
+  return count;
+}
+
+export async function deleteReadJobs(): Promise<number> {
+  const allJobs = await getAllJobs();
+  const readJobs = allJobs.filter(j => j.read);
+  for (const job of readJobs) {
+    await deleteDoc(doc(db, COLLECTION_NAME, job.id));
+  }
+  if (jobsCache) {
+    jobsCache = jobsCache.filter(j => !j.read);
+  }
+  return readJobs.length;
+}
+
+export async function markAllJobsRead(): Promise<number> {
+  const allJobs = await getAllJobs();
+  const unreadJobs = allJobs.filter(j => !j.read);
+  for (const job of unreadJobs) {
+    await updateDoc(doc(db, COLLECTION_NAME, job.id), { read: true });
+  }
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => ({ ...j, read: true }));
+  }
+  return unreadJobs.length;
+}
+
+export async function exportJobs(format: 'csv' | 'json'): Promise<string> {
+  const allJobs = await getAllJobs();
+
+  if (format === 'json') {
+    return JSON.stringify(allJobs, null, 2);
+  }
+
+  // CSV export
+  const headers = ['id', 'title', 'company', 'location', 'url', 'source', 'type', 'tags', 'saved', 'applied', 'read', 'dateReceived'];
+  const escapeCsv = (val: string) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+  const rows = allJobs.map(job =>
+    [job.id, job.title, job.company, job.location, job.url, job.source, job.type, (job.tags || []).join('; '), job.saved, job.applied, job.read, job.dateReceived]
+      .map(v => escapeCsv(String(v)))
+      .join(',')
+  );
+  return [headers.join(','), ...rows].join('\n');
 }
 
 const MAX_URL_LENGTH = 1400;

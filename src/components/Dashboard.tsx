@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getUnreadJobs, getReadJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges } from '../services/jobService';
+import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges } from '../services/jobService';
+import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
 import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
 import type { Job, JobBadges } from '../types';
@@ -9,6 +10,9 @@ interface DashboardProps {
 }
 
 export function Dashboard({ refreshTrigger }: DashboardProps) {
+  // Re-read settings whenever refreshTrigger changes (e.g. after settings saved)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const settings = useMemo(() => getSettings(), [refreshTrigger]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -17,22 +21,28 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [savedFilter, setSavedFilter] = useState(false);
-  const [sortBy, setSortBy] = useState('none');
+  const [sortBy, setSortBy] = useState<string>(settings.defaultSort);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
-  const [showReadJobs, setShowReadJobs] = useState(false);
+  const [showReadJobs, setShowReadJobs] = useState(settings.defaultView === 'read');
+  const [showAllJobs, setShowAllJobs] = useState(settings.defaultView === 'all');
   const [badgeSelectorOpenId, setBadgeSelectorOpenId] = useState<string | null>(null);
   const jobListRef = useRef<HTMLDivElement>(null);
-  const pageSize = 20;
+  const pageSize = settings.jobsPerPage;
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
     try {
-      const data = showReadJobs
-        ? await getReadJobs()
-        : await getUnreadJobs();
+      let data: Job[];
+      if (showAllJobs) {
+        data = await getAllJobs();
+      } else if (showReadJobs) {
+        data = await getReadJobs();
+      } else {
+        data = await getUnreadJobs();
+      }
       setJobs(data);
       setError(null);
     } catch (err) {
@@ -41,7 +51,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     } finally {
       setLoading(false);
     }
-  }, [showReadJobs]);
+  }, [showReadJobs, showAllJobs]);
 
   const refreshTriggerRef = useRef(refreshTrigger);
   useEffect(() => {
@@ -106,7 +116,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     setTypeFilter('all');
     setSourceFilter('all');
     setSavedFilter(false);
-    setSortBy('date-desc');
+    setSortBy(settings.defaultSort);
   };
 
   const handleRepostClick = (job: Job) => {
@@ -269,6 +279,11 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     }
   };
 
+  const visibleBadgeCategories = useMemo(() =>
+    BADGE_CATEGORIES.filter(cat => settings.badgeVisibility[cat.key as keyof typeof settings.badgeVisibility]),
+    [settings.badgeVisibility]
+  );
+
   const formatDate = (dateString: string) => {
     if (!dateString) return '';
     const d = new Date(dateString);
@@ -399,14 +414,29 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
             <span className="filter-count">{savedCount}</span>
           </button>
 
-          <button
-            className={`saved-filter-btn ${showReadJobs ? 'active' : ''}`}
-            onClick={() => setShowReadJobs(f => !f)}
-            title={showReadJobs ? 'Showing read jobs only' : 'Showing unread jobs only'}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill={showReadJobs ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>Show Read Jobs</span>
-          </button>
+          <div className="view-toggle-group">
+            <button
+              className={`view-toggle-btn ${!showReadJobs && !showAllJobs ? 'active' : ''}`}
+              onClick={() => { setShowReadJobs(false); setShowAllJobs(false); }}
+              title="Show unread jobs only"
+            >
+              Unread
+            </button>
+            <button
+              className={`view-toggle-btn ${showReadJobs ? 'active' : ''}`}
+              onClick={() => { setShowReadJobs(true); setShowAllJobs(false); }}
+              title="Show read jobs only"
+            >
+              Read
+            </button>
+            <button
+              className={`view-toggle-btn ${showAllJobs ? 'active' : ''}`}
+              onClick={() => { setShowAllJobs(true); setShowReadJobs(false); }}
+              title="Show all jobs"
+            >
+              All
+            </button>
+          </div>
 
           <div className="filter-section">
             <h4 className="filter-heading">Source</h4>
@@ -567,12 +597,13 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                         {job.type && (
                           <button className={`type-badge ${getTypeBadgeClass(job.type)}`} onClick={() => setTypeFilter(job.type)}>{job.type}</button>
                         )}
-                        {job.badges && BADGE_CATEGORIES.map(cat => {
-                          const items = job.badges?.[cat.key as keyof JobBadges] || [];
-                          return items.map(badge => (
-                            <span key={`${cat.key}-${badge}`} className={`category-badge ${getBadgeCategoryClass(cat.key)}`}>{badge}</span>
-                          ));
-                        })}
+                        {job.badges && visibleBadgeCategories.map(cat => {
+                            const items = job.badges?.[cat.key as keyof JobBadges] || [];
+                            if (items.length === 0) return null;
+                            return items.map(badge => (
+                              <span key={`${cat.key}-${badge}`} className={`category-badge ${getBadgeCategoryClass(cat.key)}`}>{badge}</span>
+                            ));
+                          })}
                         {job.tags?.map(tag => (
                           <button key={tag} className="tag" onClick={() => setSearchTerm(tag)}>{tag}</button>
                         ))}

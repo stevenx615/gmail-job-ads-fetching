@@ -93,14 +93,21 @@ export const BADGE_CATEGORIES: BadgeCategory[] = [
   },
 ];
 
-export function getBadgeCategoriesForJobType(jobType: string): BadgeCategory[] {
+export function getBadgeCategoriesForJobType(
+  jobType: string,
+  customBadges?: { responsibilities: string[]; qualifications: string[]; skills: string[]; benefits: string[] },
+): BadgeCategory[] {
   return BADGE_CATEGORIES.map(cat => {
-    if (cat.key === 'skills') {
-      return {
-        ...cat,
-        badges: getSkillsForJobType(jobType),
-      };
+    let badges = cat.key === 'skills' ? getSkillsForJobType(jobType) : cat.badges;
+    // Append custom badges from settings, avoiding duplicates
+    const custom = customBadges?.[cat.key as keyof typeof customBadges];
+    if (custom && custom.length > 0) {
+      const existing = new Set(badges);
+      const newBadges = custom.filter(b => !existing.has(b));
+      if (newBadges.length > 0) {
+        badges = [...badges, ...newBadges];
+      }
     }
-    return cat;
+    return { ...cat, badges };
   });
 }

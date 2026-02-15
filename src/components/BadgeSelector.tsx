@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getBadgeCategoriesForJobType } from '../constants/badgeDefinitions';
+import { getSettings, updateSetting } from '../services/settingsService';
 import type { JobBadges } from '../types';
 
 interface BadgeSelectorProps {
@@ -17,7 +18,10 @@ const EMPTY_BADGES: JobBadges = {
 };
 
 export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSelectorProps) {
-  const categories = getBadgeCategoriesForJobType(jobType);
+  const settings = getSettings();
+  const [customBadges, setCustomBadges] = useState(settings.customBadges);
+  const categories = getBadgeCategoriesForJobType(jobType, customBadges)
+    .filter(cat => settings.badgeVisibility[cat.key as keyof typeof settings.badgeVisibility]);
   const selectorRef = useRef<HTMLDivElement>(null);
 
   const [localBadges, setLocalBadges] = useState<JobBadges>({
@@ -29,8 +33,9 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
     benefits: [...(badges.benefits || [])],
   });
 
+  const [newBadgeInputs, setNewBadgeInputs] = useState<Record<string, string>>({});
+
   useEffect(() => {
-    // Scroll the selector into view when it opens
     if (selectorRef.current) {
       setTimeout(() => {
         selectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -46,6 +51,33 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
         : [...list, badge];
       return { ...prev, [category]: next };
     });
+  };
+
+  const addCustomBadge = (categoryKey: string) => {
+    const trimmed = (newBadgeInputs[categoryKey] || '').trim();
+    if (!trimmed) return;
+    const catKey = categoryKey as keyof JobBadges;
+
+    const cat = categories.find(c => c.key === categoryKey);
+    const alreadyExists = cat?.badges.includes(trimmed);
+
+    if (!alreadyExists) {
+      const updated = {
+        ...customBadges,
+        [catKey]: [...customBadges[catKey], trimmed],
+      };
+      setCustomBadges(updated);
+      updateSetting('customBadges', updated);
+    }
+
+    if (!localBadges[catKey].includes(trimmed)) {
+      setLocalBadges(prev => ({
+        ...prev,
+        [catKey]: [...prev[catKey], trimmed],
+      }));
+    }
+
+    setNewBadgeInputs(prev => ({ ...prev, [categoryKey]: '' }));
   };
 
   const getCategoryClass = (key: string) => {
@@ -78,6 +110,22 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
                     </button>
                   );
                 })}
+                <div className="badge-selector-add-inline">
+                  <input
+                    type="text"
+                    className="badge-selector-add-input"
+                    placeholder="+ Custom"
+                    value={newBadgeInputs[cat.key] || ''}
+                    onChange={e => setNewBadgeInputs(prev => ({ ...prev, [cat.key]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomBadge(cat.key); } }}
+                  />
+                  {(newBadgeInputs[cat.key] || '').trim() && (
+                    <button
+                      className={`badge-selector-add-btn ${getCategoryClass(cat.key)}`}
+                      onClick={() => addCustomBadge(cat.key)}
+                    >+</button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
