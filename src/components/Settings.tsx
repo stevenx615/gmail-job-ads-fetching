@@ -175,6 +175,19 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
                 <option value="company-asc">Company A-Z</option>
               </select>
             </div>
+
+            <div className="settings-field">
+              <label className="settings-label">Theme</label>
+              <select
+                className="settings-select"
+                value={settings.theme}
+                onChange={e => handleChange('theme', e.target.value as AppSettings['theme'])}
+              >
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="auto">System</option>
+              </select>
+            </div>
           </section>
 
 

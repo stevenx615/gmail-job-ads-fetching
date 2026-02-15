@@ -1,14 +1,36 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { GmailAuthProvider } from './context/GmailAuthContext';
 import { GmailConnectButton } from './components/gmail/GmailConnectButton';
 import { FetchEmailsPanel } from './components/gmail/FetchEmailsPanel';
 import { Dashboard } from './components/Dashboard';
 import { Settings } from './components/Settings';
+import { getSettings } from './services/settingsService';
 import './App.css';
 
 function AppContent() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+
+  // Apply theme to <html> element
+  useEffect(() => {
+    const { theme } = getSettings();
+    const applyTheme = (resolvedTheme: 'light' | 'dark') => {
+      document.documentElement.dataset.theme = resolvedTheme;
+    };
+
+    if (theme === 'dark') {
+      applyTheme('dark');
+    } else if (theme === 'light') {
+      applyTheme('light');
+    } else {
+      // auto: follow system preference
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      applyTheme(mq.matches ? 'dark' : 'light');
+      const handler = (e: MediaQueryListEvent) => applyTheme(e.matches ? 'dark' : 'light');
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    }
+  }, [refreshTrigger]);
 
   const handleFetchComplete = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
