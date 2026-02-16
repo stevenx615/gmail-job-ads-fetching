@@ -629,6 +629,10 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                         <BadgeSelector
                           badges={job.badges || { responsibilities: [], qualifications: [], skills: [], benefits: [] }}
                           jobType={job.type}
+                          jobTitle={job.title}
+                          jobCompany={job.company}
+                          jobTags={job.tags}
+                          jobLocation={job.location}
                           onConfirm={(badges) => handleBadgeConfirm(job.id, badges)}
                           onCancel={() => setBadgeSelectorOpenId(null)}
                         />

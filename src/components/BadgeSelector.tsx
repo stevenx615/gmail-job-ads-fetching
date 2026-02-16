@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { getBadgeCategoriesForJobType } from '../constants/badgeDefinitions';
 import { getSettings, updateSetting } from '../services/settingsService';
+import { suggestBadges } from '../services/aiService';
 import type { JobBadges } from '../types';
+import type { AIJobContext } from '../types/ai';
 
 interface BadgeSelectorProps {
   badges: JobBadges;
   jobType: string;
+  jobTitle?: string;
+  jobCompany?: string;
+  jobTags?: string[];
+  jobLocation?: string;
   onConfirm: (badges: JobBadges) => void;
   onCancel: () => void;
 }
@@ -17,7 +23,7 @@ const EMPTY_BADGES: JobBadges = {
   benefits: [],
 };
 
-export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSelectorProps) {
+export function BadgeSelector({ badges, jobType, jobTitle, jobCompany, jobTags, jobLocation, onConfirm, onCancel }: BadgeSelectorProps) {
   const settings = getSettings();
   const [customBadges, setCustomBadges] = useState(settings.customBadges);
   const categories = getBadgeCategoriesForJobType(jobType, customBadges)
@@ -34,6 +40,9 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
   });
 
   const [newBadgeInputs, setNewBadgeInputs] = useState<Record<string, string>>({});
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [aiSuggestedBadges, setAiSuggestedBadges] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (selectorRef.current) {
@@ -41,6 +50,86 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
         selectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }, 50);
     }
+  }, []);
+
+  // Track new badges suggested by AI that aren't in the predefined list (creative mode)
+  const [aiNewBadges, setAiNewBadges] = useState<Record<string, string[]>>({
+    responsibilities: [],
+    qualifications: [],
+    skills: [],
+    benefits: [],
+  });
+
+  // AI badge suggestions on mount
+  useEffect(() => {
+    if (!settings.autoSuggestBadges || settings.aiProvider === 'none' || !settings.aiApiKey) return;
+    if (!jobTitle) return;
+
+    let cancelled = false;
+
+    const jobContext: AIJobContext = {
+      title: jobTitle || '',
+      company: jobCompany || '',
+      type: jobType || '',
+      tags: jobTags || [],
+      location: jobLocation || '',
+    };
+
+    setIsLoadingSuggestions(true);
+    setSuggestionError(null);
+
+    suggestBadges(jobContext, settings).then(({ suggestions, error }) => {
+      if (cancelled) return;
+
+      if (error) {
+        setSuggestionError(error);
+      }
+      if (suggestions) {
+        const suggested = new Set<string>();
+        const newBadgesByCategory: Record<string, string[]> = {
+          responsibilities: [],
+          qualifications: [],
+          skills: [],
+          benefits: [],
+        };
+
+        // Build set of all known badges per category
+        const knownBadges: Record<string, Set<string>> = {};
+        for (const cat of categories) {
+          knownBadges[cat.key] = new Set(cat.badges);
+        }
+
+        // Check if the job already has saved badges (user has previously edited)
+        const hasSavedBadges = ['responsibilities', 'qualifications', 'skills', 'benefits']
+          .some(cat => (badges[cat as keyof JobBadges] || []).length > 0);
+
+        setLocalBadges(prev => {
+          const merged = { ...prev };
+          for (const category of ['responsibilities', 'qualifications', 'skills', 'benefits'] as const) {
+            const existing = new Set(prev[category]);
+            const known = knownBadges[category] || new Set();
+            for (const badge of suggestions[category]) {
+              suggested.add(badge);
+              // Only auto-select if no badges were previously saved
+              if (!hasSavedBadges && !existing.has(badge)) {
+                merged[category] = [...merged[category], badge];
+              }
+              // Track badges that aren't in the predefined list (deduplicate)
+              if (!known.has(badge) && !newBadgesByCategory[category].includes(badge)) {
+                newBadgesByCategory[category].push(badge);
+              }
+            }
+          }
+          return merged;
+        });
+        setAiSuggestedBadges(suggested);
+        setAiNewBadges(newBadgesByCategory);
+      }
+      setIsLoadingSuggestions(false);
+    });
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleBadge = (category: keyof JobBadges, badge: string) => {
@@ -92,6 +181,18 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
 
   return (
     <div className="badge-selector" ref={selectorRef} onClick={e => e.stopPropagation()}>
+      {isLoadingSuggestions && (
+        <div className="badge-selector-ai-loading">
+          <span className="badge-selector-ai-spinner" />
+          AI is suggesting badges...
+        </div>
+      )}
+      {suggestionError && (
+        <div className="badge-selector-ai-error">
+          <span>{suggestionError}</span>
+          <button className="badge-selector-ai-error-dismiss" onClick={() => setSuggestionError(null)}>&times;</button>
+        </div>
+      )}
       <div className="badge-selector-scroll">
         <div className="badge-selector-categories">
           {categories.map(cat => (
@@ -100,12 +201,28 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
               <div className="badge-selector-items">
                 {cat.badges.map(badge => {
                   const selected = localBadges[cat.key as keyof JobBadges].includes(badge);
+                  const isAiSuggested = aiSuggestedBadges.has(badge);
                   return (
                     <button
                       key={badge}
-                      className={`badge-selector-item ${getCategoryClass(cat.key)} ${selected ? 'selected' : ''}`}
+                      className={`badge-selector-item ${getCategoryClass(cat.key)} ${selected ? 'selected' : ''} ${isAiSuggested && selected ? 'ai-suggested' : ''}`}
                       onClick={() => toggleBadge(cat.key as keyof JobBadges, badge)}
                     >
+                      {isAiSuggested && <span className="ai-sparkle">&#10024;</span>}
+                      {badge}
+                    </button>
+                  );
+                })}
+                {aiNewBadges[cat.key as keyof JobBadges]?.map(badge => {
+                  const selected = localBadges[cat.key as keyof JobBadges].includes(badge);
+                  return (
+                    <button
+                      key={`ai-new-${cat.key}-${badge}`}
+                      className={`badge-selector-item ${getCategoryClass(cat.key)} ai-new-badge ${selected ? 'selected' : ''}`}
+                      onClick={() => toggleBadge(cat.key as keyof JobBadges, badge)}
+                      title="AI-suggested new badge"
+                    >
+                      <span className="ai-sparkle">&#10024;</span>
                       {badge}
                     </button>
                   );
@@ -133,7 +250,24 @@ export function BadgeSelector({ badges, jobType, onConfirm, onCancel }: BadgeSel
       </div>
       <div className="badge-selector-actions">
         <button className="badge-selector-cancel" onClick={onCancel}>Cancel</button>
-        <button className="badge-selector-confirm" onClick={() => onConfirm(localBadges)}>
+        <button className="badge-selector-confirm" onClick={() => {
+          // Save any new AI-suggested badges that the user kept selected as custom badges
+          const updatedCustom = { ...customBadges };
+          let customChanged = false;
+          for (const category of ['responsibilities', 'qualifications', 'skills', 'benefits'] as const) {
+            for (const badge of aiNewBadges[category]) {
+              if (localBadges[category].includes(badge) && !updatedCustom[category].includes(badge)) {
+                updatedCustom[category] = [...updatedCustom[category], badge];
+                customChanged = true;
+              }
+            }
+          }
+          if (customChanged) {
+            setCustomBadges(updatedCustom);
+            updateSetting('customBadges', updatedCustom);
+          }
+          onConfirm(localBadges);
+        }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
           Add
         </button>

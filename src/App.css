@@ -407,11 +407,28 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .badge-selector-confirm { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; border: none; background: var(--accent); color: #fff; transition: all 0.15s; }
 .badge-selector-confirm:hover { background: var(--accent-hover); }
 
+/* AI Badge Suggestion States */
+.badge-selector-ai-loading { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.78rem; color: var(--text-mid); background: var(--hover-bg); border-radius: 6px; margin-bottom: 0.5rem; }
+.badge-selector-ai-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-light); border-top-color: var(--accent); border-radius: 50%; animation: ai-spin 0.7s linear infinite; }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+.badge-selector-ai-error { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0.75rem; font-size: 0.75rem; color: var(--danger); background: rgba(239, 68, 68, 0.08); border-radius: 6px; margin-bottom: 0.5rem; }
+.badge-selector-ai-error-dismiss { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1rem; padding: 0 0.2rem; line-height: 1; }
+.badge-selector-item.ai-suggested { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.badge-selector-item.ai-suggested.selected { box-shadow: none; }
+.ai-sparkle { font-size: 0.6rem; margin-right: 0.15rem; }
+.badge-selector-item.ai-new-badge { border-style: dashed; border-color: var(--accent); }
+.badge-selector-item.ai-new-badge.selected { border-style: solid; }
+
 /* ===== SETTINGS MODAL ===== */
-.settings-modal { background: var(--card-bg); border-radius: 12px; width: 600px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2); }
-.settings-body { flex: 1; overflow-y: auto; padding: 0 1.5rem 1.5rem; }
-.settings-section { padding: 1.25rem 0; border-bottom: 1px solid var(--card-border); }
-.settings-section:last-child { border-bottom: none; }
+.settings-modal { background: var(--card-bg); border-radius: 12px; width: 750px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2); }
+.settings-body { flex: 1; overflow: hidden; padding: 0; }
+.settings-layout { display: flex; height: 60vh; min-height: 400px; }
+.settings-tabs { width: 200px; flex-shrink: 0; border-right: 1px solid var(--card-border); display: flex; flex-direction: column; padding: 0.75rem 0; }
+.settings-tab { display: block; width: 100%; padding: 0.65rem 1.25rem; border: none; background: none; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-mid); cursor: pointer; transition: all 0.15s; border-left: 3px solid transparent; }
+.settings-tab:hover { background: var(--hover-bg); color: var(--text-dark); }
+.settings-tab.active { color: var(--accent); border-left-color: var(--accent); background: var(--hover-bg); font-weight: 600; }
+.settings-content { flex: 1; overflow-y: auto; padding: 0 1.5rem 1.5rem; min-width: 0; }
+.settings-section { padding: 1.25rem 0; }
 .settings-section-title { font-size: 0.95rem; font-weight: 700; color: var(--text-dark); margin-bottom: 1rem; }
 .settings-field { margin-bottom: 1rem; }
 .settings-field:last-child { margin-bottom: 0; }
@@ -446,6 +463,12 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .settings-bulk-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .settings-bulk-status { display: block; font-size: 0.78rem; margin-top: 0.5rem; color: var(--accent); font-weight: 500; }
 .settings-bulk-status.error { color: var(--danger); }
+
+/* AI Settings */
+.settings-api-key-row { display: flex; gap: 0.5rem; align-items: center; }
+.settings-api-key-row .settings-input { flex: 1; }
+.settings-test-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.settings-ai-hint { display: block; font-size: 0.75rem; color: #d97706; margin-top: 0.25rem; line-height: 1.4; }
 
 /* Settings buttons */
 .settings-btn { padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-mid); transition: all 0.15s; }

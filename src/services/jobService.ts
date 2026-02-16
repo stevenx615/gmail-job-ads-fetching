@@ -58,11 +58,9 @@ function applyStableOrder(jobs: Job[]): Job[] {
  */
 export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
   if (jobsCache && !forceRefresh) {
-    console.log('[jobService] Returning cached jobs:', jobsCache.length);
     return jobsCache;
   }
 
-  console.log('[jobService] Fetching jobs from Firestore...');
   const jobsCollection = collection(db, COLLECTION_NAME);
   const q = query(jobsCollection, orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
@@ -87,25 +85,17 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
     };
   }) as Job[];
 
-  console.log('[jobService] First 5 job IDs from Firestore:', fetchedJobs.slice(0, 5).map(j => j.id));
-
   // Apply stable order from localStorage, or save current order if none exists
   const stableOrder = getStableOrder();
-  console.log('[jobService] Stable order exists:', stableOrder.length > 0, 'count:', stableOrder.length);
 
   if (stableOrder.length === 0 || stableOrder.length !== fetchedJobs.length) {
     // First time or job count changed - save the current Firestore order
-    console.log('[jobService] Saving new stable order');
     setStableOrder(fetchedJobs.map(j => j.id));
     jobsCache = fetchedJobs;
   } else {
     // Apply the stable order
-    console.log('[jobService] Applying stable order');
     jobsCache = applyStableOrder(fetchedJobs);
   }
-
-  console.log('[jobService] First 5 job IDs after ordering:', jobsCache.slice(0, 5).map(j => j.id));
-  console.log('[jobService] Fetched and cached jobs:', jobsCache.length);
   return jobsCache;
 }
 
@@ -140,7 +130,6 @@ export async function getReadJobs(): Promise<Job[]> {
 }
 
 export function invalidateJobsCache(): void {
-  console.log('[jobService] Cache invalidated');
   jobsCache = null;
   // Clear stable order so new jobs get incorporated in the next fetch
   try {

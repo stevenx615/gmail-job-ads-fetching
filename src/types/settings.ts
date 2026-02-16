@@ -27,6 +27,13 @@ export interface AppSettings {
     benefits: string[];
   };
   autoSuggestBadges: boolean;
+
+  // AI Settings
+  aiProvider: 'openai' | 'anthropic' | 'gemini' | 'none';
+  aiApiKey: string;
+  aiModel: string;
+  aiProxyUrl: string;
+  aiSuggestionMode: 'predefined' | 'creative';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -51,4 +58,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     benefits: [],
   },
   autoSuggestBadges: false,
+  aiProvider: 'none',
+  aiApiKey: '',
+  aiModel: '',
+  aiProxyUrl: '',
+  aiSuggestionMode: 'predefined',
 };
