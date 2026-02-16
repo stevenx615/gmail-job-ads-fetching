@@ -1,3 +1,10 @@
+export interface JobBadges {
+  responsibilities: string[];
+  qualifications: string[];
+  skills: string[];
+  benefits: string[];
+}
+
 export interface Job {
   id: string;
   title: string;
@@ -12,6 +19,7 @@ export interface Job {
   saved?: boolean;
   applied?: boolean;
   read?: boolean;
+  badges?: JobBadges;
   createdAt?: unknown;
 }
 
