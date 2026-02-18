@@ -41,9 +41,10 @@ npm run dev
 5. Browse, filter, and search your parsed job listings
 
 
-## Tech Stack
+## Browser Extension
 
-- **React 19** with TypeScript
-- **Vite** build tool
-- **Firebase** Firestore database
-- **Gmail API** via Google Identity Services
+The companion [Job Description Scraper](https://github.com/stevenx615/job-scraper-extension) Chrome extension can fetch full job descriptions from LinkedIn, Indeed, and Glassdoor and save them directly to your Firestore database. Descriptions appear on the dashboard in real-time.
+
+- Scrape manually via the extension popup, or enable auto-fetch in Settings > Job Management
+- Supports background scraping — no need to stay on the job page
+
