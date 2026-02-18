@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges } from '../services/jobService';
+import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged } from '../services/jobService';
 import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
 import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
@@ -29,6 +29,8 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [showReadJobs, setShowReadJobs] = useState(settings.defaultView === 'read');
   const [showAllJobs, setShowAllJobs] = useState(settings.defaultView === 'all');
   const [badgeSelectorOpenId, setBadgeSelectorOpenId] = useState<string | null>(null);
+  const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
+  const [scrapingJobIds, setScrapingJobIds] = useState<Set<string>>(new Set());
   const jobListRef = useRef<HTMLDivElement>(null);
   const pageSize = settings.jobsPerPage;
 
@@ -59,6 +61,23 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     refreshTriggerRef.current = refreshTrigger;
     loadJobs();
   }, [loadJobs, refreshTrigger]);
+
+  // Real-time listener: auto-update jobs when Firestore documents change (e.g. extension adds description)
+  useEffect(() => {
+    const unsubscribe = onJobsChanged((jobId, data) => {
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, ...data } : j));
+      // Clear scraping indicator when description arrives
+      if (data.description) {
+        setScrapingJobIds(prev => {
+          if (!prev.has(jobId)) return prev;
+          const next = new Set(prev);
+          next.delete(jobId);
+          return next;
+        });
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   const sources = useMemo(() => {
     const srcSet = new Set<string>();
@@ -530,7 +549,18 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                     <div className="job-card-body">
                       <div className="job-card-top">
                         <div>
-                          <h3 className="job-card-title">{job.url ? <a href={job.url} target="_blank" rel="noopener noreferrer">{job.title}</a> : job.title}</h3>
+                          <h3 className="job-card-title">{job.url ? <a href={job.url} target="_blank" rel="noopener noreferrer" onClick={() => {
+                            if (settings.autoFetchDescriptions && !job.description) {
+                              setScrapingJobIds(prev => new Set(prev).add(job.id));
+                              // Auto-clear after 30s timeout
+                              setTimeout(() => setScrapingJobIds(prev => {
+                                if (!prev.has(job.id)) return prev;
+                                const next = new Set(prev);
+                                next.delete(job.id);
+                                return next;
+                              }), 30000);
+                            }
+                          }}>{job.title}</a> : job.title}</h3>
                           <p className="job-card-company">{job.company}</p>
                         </div>
                         <div className="job-card-actions">
@@ -625,6 +655,26 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                         </button>
                       </div>
+                      {scrapingJobIds.has(job.id) && !job.description && (
+                        <div className="scraping-indicator">
+                          <span className="scraping-spinner" />
+                          Scraping job description...
+                        </div>
+                      )}
+                      {job.description && (
+                        <div className="job-description-section">
+                          <button
+                            className={`description-toggle ${expandedDescriptionId === job.id ? 'expanded' : ''}`}
+                            onClick={() => setExpandedDescriptionId(prev => prev === job.id ? null : job.id)}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points={expandedDescriptionId === job.id ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}/></svg>
+                            Job Description
+                          </button>
+                          {expandedDescriptionId === job.id && (
+                            <div className="description-content" dangerouslySetInnerHTML={{ __html: job.description }} />
+                          )}
+                        </div>
+                      )}
                       {badgeSelectorOpenId === job.id && (
                         <BadgeSelector
                           badges={job.badges || { responsibilities: [], qualifications: [], skills: [], benefits: [] }}
