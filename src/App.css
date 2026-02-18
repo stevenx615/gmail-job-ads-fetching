@@ -373,6 +373,25 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .card-btn-badge-add:hover { color: var(--accent); border-color: var(--accent); background: var(--applied-hover-bg); }
 .card-btn-badge-add svg { width: 14px; height: 14px; }
 
+/* ===== SCRAPING INDICATOR ===== */
+.scraping-indicator { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.4rem 0.7rem; border-radius: 6px; background: var(--hover-bg); border: 1px solid var(--card-border); font-size: 0.75rem; color: var(--accent); animation: scraping-fade 1.5s ease-in-out infinite; }
+@keyframes scraping-fade { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+.scraping-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--card-border); border-top-color: var(--accent); border-radius: 50%; animation: ai-spin 0.7s linear infinite; }
+
+/* ===== JOB DESCRIPTION SECTION ===== */
+.job-description-section { margin-top: 0.5rem; }
+.description-toggle { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; cursor: pointer; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text-mid); transition: all 0.15s; }
+.description-toggle:hover { border-color: var(--text-light); color: var(--text-dark); }
+.description-toggle.expanded { border-color: var(--accent); color: var(--accent); }
+.description-content { margin-top: 0.5rem; padding: 0.75rem; border-radius: 6px; background: var(--hover-bg); border: 1px solid var(--card-border); font-size: 0.8rem; line-height: 1.55; color: var(--text-mid); max-height: 300px; overflow-y: auto; word-break: break-word; }
+.description-content p { margin-bottom: 0.5rem; }
+.description-content ul, .description-content ol { margin: 0.4rem 0 0.4rem 1.2rem; }
+.description-content li { margin-bottom: 0.25rem; }
+.description-content h1, .description-content h2, .description-content h3, .description-content h4 { font-size: 0.85rem; font-weight: 600; color: var(--text-dark); margin: 0.6rem 0 0.3rem; }
+.description-content b, .description-content strong { color: var(--text-dark); }
+.description-content a { color: var(--accent); text-decoration: none; }
+.description-content a:hover { text-decoration: underline; }
+
 /* ===== BADGE SELECTOR PANEL ===== */
 .badge-selector { border-top: 1px solid var(--card-border); margin-top: 0.75rem; padding-top: 0.75rem; display: flex; flex-direction: column; max-height: min(400px, 50vh); }
 .badge-selector-scroll { flex: 1; overflow-y: auto; padding-right: 0.5rem; margin-bottom: 0.75rem; min-height: 0; }

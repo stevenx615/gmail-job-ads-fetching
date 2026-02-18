@@ -222,6 +222,18 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
             <h3 className="settings-section-title">Job Management</h3>
 
             <div className="settings-field">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={settings.autoFetchDescriptions}
+                  onChange={e => handleChange('autoFetchDescriptions', e.target.checked)}
+                />
+                <span>Auto-fetch job descriptions</span>
+              </label>
+              <span className="settings-hint">When enabled, clicking a job title will automatically fetch its description via the <a href="https://github.com/stevenx615/job-scraper-extension" target="_blank" rel="noopener noreferrer">Job Description Scraper</a> browser extension. Supports LinkedIn, Indeed, and Glassdoor.</span>
+            </div>
+
+            <div className="settings-field">
               <label className="settings-label">Auto-mark as read after (days)</label>
               <div className="settings-inline">
                 <input

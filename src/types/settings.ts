@@ -5,6 +5,9 @@ export interface AppSettings {
   defaultSort: 'none' | 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'company-asc';
   theme: 'light' | 'dark' | 'auto';
 
+  // Extension Settings
+  autoFetchDescriptions: boolean;
+
   // Email Fetching Settings
   customSenders: string[];
   defaultAutoArchive: boolean;
@@ -41,6 +44,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultView: 'unread',
   defaultSort: 'none',
   theme: 'light',
+  autoFetchDescriptions: false,
   customSenders: [],
   defaultAutoArchive: false,
   autoMarkReadAfterDays: 0,

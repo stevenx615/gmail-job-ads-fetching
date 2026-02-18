@@ -8,6 +8,7 @@ import {
   query,
   orderBy,
   serverTimestamp,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { Job, JobBadges, NewJob } from '../types';
@@ -78,6 +79,7 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
       saved: data.saved || false,
       applied: data.applied || false,
       read: data.read || false,
+      description: data.description || undefined,
       badges: data.badges || undefined,
       emailId: data.emailId,
       dateReceived: data.dateReceived?.toDate ? data.dateReceived.toDate().toISOString() : (data.dateReceived || new Date().toISOString()),
@@ -127,6 +129,34 @@ export async function getReadJobs(): Promise<Job[]> {
     console.error('Error fetching read jobs:', error);
     return [];
   }
+}
+
+/**
+ * Subscribe to real-time Firestore updates.
+ * Calls onUpdate with the changed job's id and updated fields
+ * whenever a document in the jobs collection is modified.
+ * Returns an unsubscribe function.
+ */
+export function onJobsChanged(onUpdate: (jobId: string, data: Partial<Job>) => void): () => void {
+  const jobsCollection = collection(db, COLLECTION_NAME);
+  const q = query(jobsCollection, orderBy('createdAt', 'desc'));
+
+  return onSnapshot(q, (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === 'modified') {
+        const data = change.doc.data();
+        onUpdate(change.doc.id, {
+          description: data.description || undefined,
+          title: data.title || '',
+          company: data.company || '',
+          saved: data.saved || false,
+          applied: data.applied || false,
+          read: data.read || false,
+          badges: data.badges || undefined,
+        });
+      }
+    });
+  });
 }
 
 export function invalidateJobsCache(): void {

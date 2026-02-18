@@ -19,6 +19,7 @@ export interface Job {
   saved?: boolean;
   applied?: boolean;
   read?: boolean;
+  description?: string;
   badges?: JobBadges;
   createdAt?: unknown;
 }
