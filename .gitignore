@@ -18,7 +18,7 @@ dist-ssr
 client_secret_*
 
 # Python
-__pycache__/
+backend/__pycache__
 *.pyc
 *.pyo
 
