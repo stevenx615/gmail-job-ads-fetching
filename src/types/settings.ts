@@ -15,6 +15,7 @@ export interface AppSettings {
   // Job Management
   autoMarkReadAfterDays: number; // 0 = never
   autoDeleteAfterDays: number; // 0 = never
+  resumeText: string;
 
   // Badge Settings
   badgeVisibility: {
@@ -37,6 +38,11 @@ export interface AppSettings {
   aiModel: string;
   aiProxyUrl: string;
   aiSuggestionMode: 'predefined' | 'creative';
+
+  // Resume Tailoring Settings
+  tailorTone: 'professional' | 'casual' | 'executive' | 'technical';
+  tailorLength: 'same' | 'concise' | 'detailed';
+  tailorCustomInstructions: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -49,6 +55,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultAutoArchive: false,
   autoMarkReadAfterDays: 0,
   autoDeleteAfterDays: 0,
+  resumeText: '',
   badgeVisibility: {
     responsibilities: true,
     qualifications: true,
@@ -67,4 +74,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiModel: '',
   aiProxyUrl: '',
   aiSuggestionMode: 'predefined',
+  tailorTone: 'professional',
+  tailorLength: 'same',
+  tailorCustomInstructions: '',
 };
