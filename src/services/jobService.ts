@@ -81,6 +81,7 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
       read: data.read || false,
       description: data.description || undefined,
       badges: data.badges || undefined,
+      applicationStage: data.applicationStage as ApplicationStage | undefined,
       emailId: data.emailId,
       dateReceived: data.dateReceived?.toDate ? data.dateReceived.toDate().toISOString() : (data.dateReceived || new Date().toISOString()),
       createdAt: data.createdAt?.toDate?.() || new Date(),
@@ -153,6 +154,7 @@ export function onJobsChanged(onUpdate: (jobId: string, data: Partial<Job>) => v
           applied: data.applied || false,
           read: data.read || false,
           badges: data.badges || undefined,
+          applicationStage: data.applicationStage as ApplicationStage | undefined,
         });
       }
     });
