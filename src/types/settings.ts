@@ -35,6 +35,7 @@ export interface AppSettings {
   // AI Settings
   aiProvider: 'openai' | 'anthropic' | 'gemini' | 'none';
   aiApiKey: string;
+  aiApiKeys: { gemini: string; openai: string; anthropic: string };
   aiModel: string;
   aiProxyUrl: string;
   aiSuggestionMode: 'predefined' | 'creative';
@@ -71,6 +72,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSuggestBadges: false,
   aiProvider: 'none',
   aiApiKey: '',
+  aiApiKeys: { gemini: '', openai: '', anthropic: '' },
   aiModel: '',
   aiProxyUrl: '',
   aiSuggestionMode: 'predefined',

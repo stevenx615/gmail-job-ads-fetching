@@ -3,10 +3,11 @@ import json
 import re
 from typing import List
 
+import httpx
 from docx import Document
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -224,4 +225,114 @@ async def rebuild_docx(
         output,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": "attachment; filename=tailored_resume.docx"},
+    )
+
+
+# ── AI Complete (server-side) ──────────────────────────────────────────────────
+# Calls AI providers server-side so the browser never needs CORS access.
+# Used by Resume Tailoring feature.
+
+class AICompleteRequest(BaseModel):
+    provider: str
+    apiKey: str
+    model: str
+    prompt: str
+    maxTokens: int = 4096
+
+
+@app.post("/api/ai/complete")
+async def ai_complete(req: AICompleteRequest):
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        if req.provider == "anthropic":
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": req.apiKey,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": req.model,
+                    "max_tokens": req.maxTokens,
+                    "messages": [{"role": "user", "content": req.prompt}],
+                },
+            )
+            if not resp.is_success:
+                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+            text = resp.json()["content"][0]["text"]
+
+        elif req.provider == "openai":
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {req.apiKey}",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": req.model,
+                    "messages": [{"role": "user", "content": req.prompt}],
+                    "temperature": 0.3,
+                },
+            )
+            if not resp.is_success:
+                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+            text = resp.json()["choices"][0]["message"]["content"]
+
+        elif req.provider == "gemini":
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{req.model}:generateContent?key={req.apiKey}"
+            )
+            resp = await client.post(
+                url,
+                headers={"content-type": "application/json"},
+                json={"contents": [{"parts": [{"text": req.prompt}]}]},
+            )
+            if not resp.is_success:
+                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider}")
+
+    return {"text": text}
+
+
+# ── AI API Proxy ──────────────────────────────────────────────────────────────
+# Forwards browser requests to Anthropic / OpenAI, bypassing browser CORS restrictions.
+# Usage: set Proxy URL in Settings to http://localhost:8000/api/proxy/anthropic
+#                                   or http://localhost:8000/api/proxy/openai
+
+_PROXY_TARGETS = {
+    "anthropic": "https://api.anthropic.com",
+    "openai":    "https://api.openai.com",
+}
+
+_FORWARD_HEADERS = {
+    "authorization", "x-api-key", "anthropic-version",
+    "content-type", "anthropic-dangerous-direct-browser-access",
+}
+
+
+@app.api_route("/api/proxy/{provider}/{path:path}", methods=["GET", "POST", "OPTIONS"])
+async def ai_proxy(provider: str, path: str, request: Request):
+    if provider not in _PROXY_TARGETS:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
+
+    target_url = f"{_PROXY_TARGETS[provider]}/{path}"
+    body = await request.body()
+    headers = {k: v for k, v in request.headers.items() if k.lower() in _FORWARD_HEADERS}
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.request(
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            content=body,
+        )
+
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        media_type=resp.headers.get("content-type", "application/json"),
     )

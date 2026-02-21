@@ -102,6 +102,24 @@ function parseAIResponse(text: string, availableBadges: Record<string, string[]>
   }
 }
 
+async function callBackendAI(prompt: string, apiKey: string, model: string, provider: string, maxTokens: number = 4096): Promise<string> {
+  const res = await fetch('/api/ai/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, apiKey, model, prompt, maxTokens }),
+  });
+
+  if (!res.ok) {
+    if (res.status === 429) throw new Error('429 rate limit exceeded');
+    if (res.status === 401 || res.status === 403) throw new Error('Invalid API key');
+    const detail = await res.text().catch(() => '');
+    throw new Error(`AI API error: ${res.status}${detail ? ` — ${detail}` : ''}`);
+  }
+
+  const data = await res.json();
+  return data.text || '';
+}
+
 async function callGemini(prompt: string, apiKey: string, model: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
@@ -333,7 +351,7 @@ export async function tailorResume(
   company: string,
   settings: AppSettings,
 ): Promise<TailorResumeResult> {
-  const { aiProvider, aiApiKey, aiModel, aiProxyUrl } = settings;
+  const { aiProvider, aiApiKey, aiModel } = settings;
 
   if (aiProvider === 'none' || !aiApiKey) {
     return { tailoredResume: null, error: 'No AI provider configured. Set one up in Settings.' };
@@ -345,22 +363,7 @@ export async function tailorResume(
   const model = aiModel || getDefaultModel(aiProvider);
 
   try {
-    let responseText: string;
-
-    switch (aiProvider) {
-      case 'gemini':
-        responseText = await callGemini(prompt, aiApiKey, model);
-        break;
-      case 'openai':
-        responseText = await callOpenAI(prompt, aiApiKey, model, aiProxyUrl || undefined);
-        break;
-      case 'anthropic':
-        responseText = await callAnthropic(prompt, aiApiKey, model, aiProxyUrl || undefined, 4096);
-        break;
-      default:
-        return { tailoredResume: null, error: 'Unknown AI provider' };
-    }
-
+    const responseText = await callBackendAI(prompt, aiApiKey, model, aiProvider, 4096);
     return { tailoredResume: cleanTailoredHtml(responseText), error: null };
   } catch (err) {
     if (isRateLimitError(err)) {
@@ -369,10 +372,7 @@ export async function tailorResume(
       return { tailoredResume: null, error: `API quota exceeded.${retryHint}` };
     }
     if (isCorsError(err)) {
-      const hint = aiProvider === 'gemini'
-        ? 'Unexpected CORS error with Gemini.'
-        : `CORS blocked. Add a proxy URL in Settings, or switch to Google Gemini.`;
-      return { tailoredResume: null, error: hint };
+      return { tailoredResume: null, error: 'Backend not available. Start the local backend to use resume tailoring.' };
     }
     if (err instanceof Error && err.message === 'Invalid API key') {
       return { tailoredResume: null, error: 'Invalid API key. Check your key in Settings.' };
@@ -395,7 +395,7 @@ export async function tailorResumeDocx(
   company: string,
   settings: AppSettings,
 ): Promise<TailorDocxResult> {
-  const { aiProvider, aiApiKey, aiModel, aiProxyUrl } = settings;
+  const { aiProvider, aiApiKey, aiModel } = settings;
 
   if (aiProvider === 'none' || !aiApiKey) {
     return { replacements: null, error: 'No AI provider configured. Set one up in Settings.' };
@@ -421,21 +421,7 @@ Resume sections to edit:
 ${JSON.stringify(contentSections.map(s => ({ i: s.index, text: s.text })))}`;
 
   try {
-    let responseText: string;
-
-    switch (aiProvider) {
-      case 'gemini':
-        responseText = await callGemini(prompt, aiApiKey, model);
-        break;
-      case 'openai':
-        responseText = await callOpenAI(prompt, aiApiKey, model, aiProxyUrl || undefined);
-        break;
-      case 'anthropic':
-        responseText = await callAnthropic(prompt, aiApiKey, model, aiProxyUrl || undefined, 4096);
-        break;
-      default:
-        return { replacements: null, error: 'Unknown AI provider' };
-    }
+    const responseText = await callBackendAI(prompt, aiApiKey, model, aiProvider, 4096);
 
     let cleaned = responseText.trim();
     const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -458,10 +444,7 @@ ${JSON.stringify(contentSections.map(s => ({ i: s.index, text: s.text })))}`;
       return { replacements: null, error: `API quota exceeded.${retryHint}` };
     }
     if (isCorsError(err)) {
-      const hint = aiProvider === 'gemini'
-        ? 'Unexpected CORS error with Gemini.'
-        : `CORS blocked. Add a proxy URL in Settings, or switch to Google Gemini.`;
-      return { replacements: null, error: hint };
+      return { replacements: null, error: 'Backend not available. Start the local backend to use resume tailoring.' };
     }
     if (err instanceof Error && err.message === 'Invalid API key') {
       return { replacements: null, error: 'Invalid API key. Check your key in Settings.' };

@@ -10,7 +10,11 @@ export function getSettings(): AppSettings {
 
     const parsed = JSON.parse(stored);
     // Merge with defaults to handle new settings added in updates
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      aiApiKeys: { ...DEFAULT_SETTINGS.aiApiKeys, ...(parsed.aiApiKeys || {}) },
+    };
   } catch (error) {
     console.error('[settingsService] Error loading settings:', error);
     return DEFAULT_SETTINGS;

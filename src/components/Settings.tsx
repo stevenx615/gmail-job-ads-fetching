@@ -5,6 +5,31 @@ import { testAIConnection, getDefaultModel, clearSuggestionCache } from '../serv
 import type { AppSettings } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 
+const PROVIDER_MODELS: Record<string, { label: string; value: string }[]> = {
+  gemini: [
+    { label: 'Gemini 2.5 Flash (default)', value: 'gemini-2.5-flash' },
+    { label: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
+    { label: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
+    { label: 'Gemini 2.0 Flash Lite', value: 'gemini-2.0-flash-lite' },
+    { label: 'Gemini 1.5 Flash', value: 'gemini-1.5-flash' },
+    { label: 'Gemini 1.5 Pro', value: 'gemini-1.5-pro' },
+  ],
+  openai: [
+    { label: 'GPT-4o Mini (default)', value: 'gpt-4o-mini' },
+    { label: 'GPT-4o', value: 'gpt-4o' },
+    { label: 'GPT-4 Turbo', value: 'gpt-4-turbo' },
+    { label: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' },
+  ],
+  anthropic: [
+    { label: 'Claude 3.5 Haiku (default)', value: 'claude-3-5-haiku-20241022' },
+    { label: 'Claude 3.5 Sonnet', value: 'claude-3-5-sonnet-20241022' },
+    { label: 'Claude 3.7 Sonnet', value: 'claude-3-7-sonnet-20250219' },
+    { label: 'Claude Haiku 4.5', value: 'claude-haiku-4-5-20251001' },
+    { label: 'Claude Sonnet 4.6', value: 'claude-sonnet-4-6' },
+    { label: 'Claude Opus 4.6', value: 'claude-opus-4-6' },
+  ],
+};
+
 interface SettingsProps {
   onClose: () => void;
   onSettingsSaved: () => void;
@@ -23,6 +48,7 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
   const [aiTestStatus, setAiTestStatus] = useState<{ message: string; success: boolean } | null>(null);
   const [aiTesting, setAiTesting] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai');
+  const [useCustomModel, setUseCustomModel] = useState(false);
 
   useEffect(() => {
     setSettings(getSettings());
@@ -417,7 +443,11 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
                 onChange={e => {
                   const provider = e.target.value as AppSettings['aiProvider'];
                   handleChange('aiProvider', provider);
-                  if (provider !== 'none') handleChange('aiModel', getDefaultModel(provider));
+                  if (provider !== 'none') {
+                    handleChange('aiModel', getDefaultModel(provider));
+                    handleChange('aiApiKey', settings.aiApiKeys[provider as keyof AppSettings['aiApiKeys']] || '');
+                  }
+                  setUseCustomModel(false);
                   setAiTestStatus(null);
                   clearSuggestionCache();
                 }}
@@ -439,7 +469,15 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
                       className="settings-input"
                       placeholder="Enter your API key"
                       value={settings.aiApiKey}
-                      onChange={e => handleChange('aiApiKey', e.target.value)}
+                      onChange={e => {
+                        handleChange('aiApiKey', e.target.value);
+                        if (settings.aiProvider !== 'none') {
+                          handleChange('aiApiKeys', {
+                            ...settings.aiApiKeys,
+                            [settings.aiProvider]: e.target.value,
+                          });
+                        }
+                      }}
                     />
                     <button className="settings-btn settings-btn-bulk" onClick={() => setShowApiKey(prev => !prev)} type="button">
                       {showApiKey ? 'Hide' : 'Show'}
@@ -449,28 +487,68 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
 
                 <div className="settings-field">
                   <label className="settings-label">Model</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    placeholder={getDefaultModel(settings.aiProvider)}
-                    value={settings.aiModel}
-                    onChange={e => { handleChange('aiModel', e.target.value); clearSuggestionCache(); }}
-                  />
-                  <span className="settings-hint">Default: {getDefaultModel(settings.aiProvider)}</span>
+                  {(() => {
+                    const knownModels = PROVIDER_MODELS[settings.aiProvider] || [];
+                    const knownValues = knownModels.map(m => m.value);
+                    const isCustom = useCustomModel || (!!settings.aiModel && !knownValues.includes(settings.aiModel));
+                    const selectVal = isCustom ? '__custom__' : (settings.aiModel || getDefaultModel(settings.aiProvider));
+                    return (
+                      <>
+                        <select
+                          className="settings-select"
+                          value={selectVal}
+                          onChange={e => {
+                            if (e.target.value === '__custom__') {
+                              setUseCustomModel(true);
+                            } else {
+                              setUseCustomModel(false);
+                              handleChange('aiModel', e.target.value);
+                              clearSuggestionCache();
+                            }
+                          }}
+                        >
+                          {knownModels.map(m => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                          <option value="__custom__">Custom...</option>
+                        </select>
+                        {isCustom && (
+                          <input
+                            type="text"
+                            className="settings-input"
+                            style={{ marginTop: '6px' }}
+                            placeholder="Enter model name"
+                            value={settings.aiModel}
+                            onChange={e => { handleChange('aiModel', e.target.value); clearSuggestionCache(); }}
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {(settings.aiProvider === 'openai' || settings.aiProvider === 'anthropic') && (
                   <div className="settings-field">
                     <label className="settings-label">CORS Proxy URL</label>
-                    <input
-                      type="text"
-                      className="settings-input"
-                      placeholder="https://your-proxy.example.com"
-                      value={settings.aiProxyUrl}
-                      onChange={e => handleChange('aiProxyUrl', e.target.value)}
-                    />
+                    <div className="settings-proxy-row">
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder={`http://localhost:8000/api/proxy/${settings.aiProvider}`}
+                        value={settings.aiProxyUrl}
+                        onChange={e => handleChange('aiProxyUrl', e.target.value)}
+                      />
+                      <button
+                        className="settings-btn settings-btn-bulk"
+                        type="button"
+                        onClick={() => handleChange('aiProxyUrl', `http://localhost:8000/api/proxy/${settings.aiProvider}`)}
+                      >
+                        Use Local
+                      </button>
+                    </div>
                     <span className="settings-ai-hint">
-                      {settings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} blocks browser requests (CORS). Provide a proxy URL, or switch to Google Gemini which works directly from the browser.
+                      {settings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} blocks direct browser requests (CORS).
+                      Click <strong>Use Local</strong> to route through the local backend — requires the backend to be running (<code>uvicorn main:app --reload --port 8000</code>).
                     </span>
                   </div>
                 )}

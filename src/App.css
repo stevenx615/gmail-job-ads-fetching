@@ -488,6 +488,8 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 /* AI Settings */
 .settings-api-key-row { display: flex; gap: 0.5rem; align-items: center; }
 .settings-api-key-row .settings-input { flex: 1; }
+.settings-proxy-row { display: flex; gap: 0.5rem; align-items: center; }
+.settings-proxy-row .settings-input { flex: 1; }
 .settings-test-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .settings-ai-hint { display: block; font-size: 0.75rem; color: #d97706; margin-top: 0.25rem; line-height: 1.4; }
 
@@ -519,7 +521,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .nav-btn-settings:hover svg { transform: rotate(90deg); }
 
 /* ===== RESUME SIDEBAR SECTION ===== */
-.resume-sidebar-section { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--card-border); }
+.resume-sidebar-section { margin-top: 1.5rem; }
 .resume-sidebar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
 .resume-sidebar-status { font-size: 0.72rem; font-weight: 600; color: var(--accent); background: var(--applied-badge-bg); padding: 0.15rem 0.5rem; border-radius: 4px; }
 .resume-docx-badge { background: var(--source-indeed-bg); color: var(--source-indeed-color); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
