@@ -102,6 +102,24 @@ function parseAIResponse(text: string, availableBadges: Record<string, string[]>
   }
 }
 
+async function callBackendAI(prompt: string, apiKey: string, model: string, provider: string, maxTokens: number = 4096): Promise<string> {
+  const res = await fetch('/api/ai/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, apiKey, model, prompt, maxTokens }),
+  });
+
+  if (!res.ok) {
+    if (res.status === 429) throw new Error('429 rate limit exceeded');
+    if (res.status === 401 || res.status === 403) throw new Error('Invalid API key');
+    const detail = await res.text().catch(() => '');
+    throw new Error(`AI API error: ${res.status}${detail ? ` — ${detail}` : ''}`);
+  }
+
+  const data = await res.json();
+  return data.text || '';
+}
+
 async function callGemini(prompt: string, apiKey: string, model: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
@@ -138,7 +156,7 @@ async function callOpenAI(prompt: string, apiKey: string, model: string, proxyUr
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callAnthropic(prompt: string, apiKey: string, model: string, proxyUrl?: string): Promise<string> {
+async function callAnthropic(prompt: string, apiKey: string, model: string, proxyUrl?: string, maxTokens: number = 1024): Promise<string> {
   const baseUrl = proxyUrl || 'https://api.anthropic.com';
   const url = `${baseUrl}/v1/messages`;
 
@@ -152,7 +170,7 @@ async function callAnthropic(prompt: string, apiKey: string, model: string, prox
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1024,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -267,6 +285,171 @@ export async function suggestBadges(
       return { suggestions: null, error: 'Invalid API key. Check your key in Settings.' };
     }
     return { suggestions: null, error: `AI request failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
+  }
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function buildTailorPrompt(resumeText: string, jobDescription: string, jobTitle: string, company: string, settings: AppSettings): string {
+  const toneMap: Record<string, string> = {
+    professional: 'professional and formal',
+    casual: 'conversational and approachable',
+    executive: 'executive and leadership-focused',
+    technical: 'technical and detail-oriented',
+  };
+  const lengthMap: Record<string, string> = {
+    same: 'Keep the same length as the original resume',
+    concise: 'Make it more concise — trim less relevant details',
+    detailed: 'Expand with more detail to better match the role',
+  };
+  const customPart = settings.tailorCustomInstructions?.trim()
+    ? `- Additional instructions: ${settings.tailorCustomInstructions}`
+    : '';
+
+  return `You are a professional resume writer. Your task is to tailor the provided resume to the job description below.
+
+Instructions:
+- Tone: Write in a ${toneMap[settings.tailorTone] || 'professional and formal'} tone
+- Length: ${lengthMap[settings.tailorLength] || 'Keep the same length as the original resume'}
+- Reorder and emphasize bullet points to match the job requirements
+- Adapt the summary/objective to align with the role
+- Use keywords from the job description where they accurately reflect the candidate's experience
+- Do NOT invent or fabricate any experience, skills, or qualifications not present in the original resume${customPart ? `\n- ${customPart}` : ''}
+- Return the tailored resume as clean HTML using only these tags: <p>, <strong>, <em>, <ul>, <ol>, <li>, <h2>, <h3>, <br>, <hr>
+- Use <h2> for the candidate's name and <h3> for each section title (e.g. Summary, Experience, Education, Skills)
+- Use <p> for regular text, <ul>/<li> for bullet points, <strong> for job titles or company names within paragraphs
+- No inline styles, no classes, no doctype, no <html> or <body> wrapper, no markdown, no explanation
+
+Job Title: ${jobTitle}
+Company: ${company}
+
+Job Description:
+${jobDescription}
+
+Original Resume:
+${resumeText}
+
+Tailored Resume (HTML only):`;
+}
+
+function cleanTailoredHtml(raw: string): string {
+  const fenceMatch = raw.match(/```(?:html)?\s*([\s\S]*?)```/);
+  return (fenceMatch ? fenceMatch[1] : raw).trim();
+}
+
+export interface TailorResumeResult {
+  tailoredResume: string | null;
+  error: string | null;
+}
+
+export async function tailorResume(
+  resumeText: string,
+  jobDescription: string,
+  jobTitle: string,
+  company: string,
+  settings: AppSettings,
+): Promise<TailorResumeResult> {
+  const { aiProvider, aiApiKey, aiModel } = settings;
+
+  if (aiProvider === 'none' || !aiApiKey) {
+    return { tailoredResume: null, error: 'No AI provider configured. Set one up in Settings.' };
+  }
+
+  const cleanedDescription = stripHtml(jobDescription);
+  const cleanedResume = stripHtml(resumeText);
+  const prompt = buildTailorPrompt(cleanedResume, cleanedDescription, jobTitle, company, settings);
+  const model = aiModel || getDefaultModel(aiProvider);
+
+  try {
+    const responseText = await callBackendAI(prompt, aiApiKey, model, aiProvider, 4096);
+    return { tailoredResume: cleanTailoredHtml(responseText), error: null };
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      const delay = parseRetryDelay(err);
+      const retryHint = delay ? ` Retry in ${delay}.` : ' Please wait and try again.';
+      return { tailoredResume: null, error: `API quota exceeded.${retryHint}` };
+    }
+    if (isCorsError(err)) {
+      return { tailoredResume: null, error: 'Backend not available. Start the local backend to use resume tailoring.' };
+    }
+    if (err instanceof Error && err.message === 'Invalid API key') {
+      return { tailoredResume: null, error: 'Invalid API key. Check your key in Settings.' };
+    }
+    return { tailoredResume: null, error: `AI request failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
+  }
+}
+
+export interface DocxSection { index: number; type: string; text: string; }
+export interface DocxReplacement { index: number; new_text: string; }
+export interface TailorDocxResult {
+  replacements: DocxReplacement[] | null;
+  error: string | null;
+}
+
+export async function tailorResumeDocx(
+  contentSections: DocxSection[],
+  jobDescription: string,
+  jobTitle: string,
+  company: string,
+  settings: AppSettings,
+): Promise<TailorDocxResult> {
+  const { aiProvider, aiApiKey, aiModel } = settings;
+
+  if (aiProvider === 'none' || !aiApiKey) {
+    return { replacements: null, error: 'No AI provider configured. Set one up in Settings.' };
+  }
+
+  const cleanedJobDescription = stripHtml(jobDescription);
+  const model = aiModel || getDefaultModel(aiProvider);
+
+  const prompt = `You are a professional resume editor. Edit the content sections below to better match the job description.
+RULES:
+- Edit ONLY the provided sections (these are bullet points and descriptions, NOT headings or contact info)
+- Use keywords from the job description where they accurately reflect experience
+- Keep the same bullet point structure and roughly the same length
+- Do NOT fabricate experience or skills not in the original
+- Return ONLY a JSON array (no explanation): [{"i": <index>, "text": "<edited text>"}, ...]
+- Include only sections you changed
+
+Job: ${jobTitle} at ${company}
+Job Description:
+${cleanedJobDescription}
+
+Resume sections to edit:
+${JSON.stringify(contentSections.map(s => ({ i: s.index, text: s.text })))}`;
+
+  try {
+    const responseText = await callBackendAI(prompt, aiApiKey, model, aiProvider, 4096);
+
+    let cleaned = responseText.trim();
+    const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) cleaned = fenceMatch[1].trim();
+    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!arrayMatch) return { replacements: null, error: 'Could not parse AI response as JSON array' };
+
+    const parsed = JSON.parse(arrayMatch[0]);
+    if (!Array.isArray(parsed)) return { replacements: null, error: 'AI response is not a JSON array' };
+
+    const replacements: DocxReplacement[] = parsed
+      .filter((item: unknown) => item !== null && typeof item === 'object' && 'i' in (item as object) && 'text' in (item as object))
+      .map((item: { i: number; text: string }) => ({ index: item.i, new_text: item.text }));
+
+    return { replacements, error: null };
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      const delay = parseRetryDelay(err);
+      const retryHint = delay ? ` Retry in ${delay}.` : ' Please wait and try again.';
+      return { replacements: null, error: `API quota exceeded.${retryHint}` };
+    }
+    if (isCorsError(err)) {
+      return { replacements: null, error: 'Backend not available. Start the local backend to use resume tailoring.' };
+    }
+    if (err instanceof Error && err.message === 'Invalid API key') {
+      return { replacements: null, error: 'Invalid API key. Check your key in Settings.' };
+    }
+    return { replacements: null, error: `AI request failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
   }
 }
 

@@ -67,8 +67,8 @@
   --text-dark: #f1f5f9;
   --text-mid: #94a3b8;
   --text-light: #64748b;
-  --accent: #4ade80;
-  --accent-hover: #22c55e;
+  --accent: #3fa163;
+  --accent-hover: #19783a;
   --danger: #f87171;
   --blue: #93b4ff;
   --purple: #c4a5e0;
@@ -443,12 +443,13 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .settings-body { flex: 1; overflow: hidden; padding: 0; }
 .settings-layout { display: flex; height: 60vh; min-height: 400px; }
 .settings-tabs { width: 200px; flex-shrink: 0; border-right: 1px solid var(--card-border); display: flex; flex-direction: column; padding: 0.75rem 0; }
-.settings-tab { display: block; width: 100%; padding: 0.65rem 1.25rem; border: none; background: none; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-mid); cursor: pointer; transition: all 0.15s; border-left: 3px solid transparent; }
+.settings-tab { display: block; width: 100%; padding: 0.65rem 1.25rem; border: none; background: none; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-mid); cursor: pointer; border-left: 3px solid transparent; }
 .settings-tab:hover { background: var(--hover-bg); color: var(--text-dark); }
 .settings-tab.active { color: var(--accent); border-left-color: var(--accent); background: var(--hover-bg); font-weight: 600; }
 .settings-content { flex: 1; overflow-y: auto; padding: 0 1.5rem 1.5rem; min-width: 0; }
 .settings-section { padding: 1.25rem 0; }
 .settings-section-title { font-size: 0.95rem; font-weight: 700; color: var(--text-dark); margin-bottom: 1rem; }
+.settings-section-title-gap { margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--card-border); }
 .settings-field { margin-bottom: 1rem; }
 .settings-field:last-child { margin-bottom: 0; }
 .settings-label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-dark); margin-bottom: 0.4rem; }
@@ -457,6 +458,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .settings-select-sm { max-width: 150px; }
 .settings-input { padding: 0.4rem 0.65rem; border: 1px solid var(--card-border); border-radius: 6px; font-size: 0.85rem; color: var(--text-dark); background: var(--input-bg); outline: none; flex: 1; min-width: 0; }
 .settings-input:focus { border-color: var(--accent); }
+.settings-textarea { width: 100%; resize: vertical; font-family: inherit; line-height: 1.5; }
 .settings-input-sm { width: 80px; flex: none; }
 .settings-inline { display: flex; align-items: center; gap: 0.75rem; }
 .settings-hint { font-size: 0.75rem; color: var(--text-light); margin-top: 0.25rem; display: block; }
@@ -486,6 +488,8 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 /* AI Settings */
 .settings-api-key-row { display: flex; gap: 0.5rem; align-items: center; }
 .settings-api-key-row .settings-input { flex: 1; }
+.settings-proxy-row { display: flex; gap: 0.5rem; align-items: center; }
+.settings-proxy-row .settings-input { flex: 1; }
 .settings-test-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .settings-ai-hint { display: block; font-size: 0.75rem; color: #d97706; margin-top: 0.25rem; line-height: 1.4; }
 
@@ -515,6 +519,98 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .nav-btn-settings:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .nav-btn-settings svg { transition: transform 0.3s; }
 .nav-btn-settings:hover svg { transform: rotate(90deg); }
+
+/* ===== RESUME SIDEBAR SECTION ===== */
+.resume-sidebar-section { margin-top: 1.5rem; }
+.resume-sidebar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+.resume-sidebar-status { font-size: 0.72rem; font-weight: 600; color: var(--accent); background: var(--applied-badge-bg); padding: 0.15rem 0.5rem; border-radius: 4px; }
+.resume-docx-badge { background: var(--source-indeed-bg); color: var(--source-indeed-color); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+.resume-mode-badge { font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; }
+.resume-mode-badge.upload { background: var(--source-indeed-bg); color: var(--source-indeed-color); }
+.resume-mode-badge.paste { background: var(--applied-badge-bg); color: var(--accent); }
+.resume-sidebar-file { font-size: 0.75rem; color: var(--text-light); margin-bottom: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resume-sidebar-btn { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.5rem 0.75rem; border-radius: var(--radius); border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-mid); font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.resume-sidebar-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ===== RESUME EDIT MODAL ===== */
+.resume-edit-modal { width: 1060px; max-width: 95vw; max-height: 90vh; }
+.resume-edit-body { padding: 0; flex: 1; min-height: 0; overflow: hidden; }
+
+/* Tab bar */
+.resume-input-tabs { display: flex; border-bottom: 1px solid var(--card-border); padding: 0 1.25rem; gap: 0; flex-shrink: 0; }
+.resume-input-tab { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1rem; font-size: 0.83rem; font-weight: 500; color: var(--text-light); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+.resume-input-tab:hover { color: var(--text-mid); }
+.resume-input-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Upload zone */
+.resume-upload-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; min-height: 300px; margin: 1.25rem; border: 2px dashed var(--card-border); border-radius: var(--radius); color: var(--text-light); cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.resume-upload-zone:hover, .resume-upload-zone.drag-over { border-color: var(--accent); background: var(--applied-badge-bg); color: var(--text-mid); }
+.resume-upload-zone.has-file { border-style: solid; border-color: var(--accent); background: var(--applied-badge-bg); color: var(--text-mid); }
+.resume-upload-label { font-size: 0.9rem; font-weight: 500; }
+.resume-upload-hint { font-size: 0.78rem; }
+.resume-upload-file { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.resume-upload-filename { font-size: 0.9rem; font-weight: 600; color: var(--accent); word-break: break-all; text-align: center; max-width: 400px; }
+.resume-upload-change { font-size: 0.75rem; color: var(--text-light); }
+.resume-upload-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; border-bottom: 1px solid var(--card-border); background: var(--card-bg); flex-shrink: 0; gap: 1rem; }
+.resume-upload-header-info { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.resume-upload-header-info svg { flex-shrink: 0; color: var(--text-light); }
+.resume-upload-header-info .resume-upload-filename { font-size: 0.95rem; font-weight: 600; color: var(--text-dark); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.resume-upload-change-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; font-weight: 600; color: var(--accent); background: none; border: 1.5px solid var(--accent); border-radius: 6px; padding: 0.45rem 1.1rem; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.resume-upload-change-btn:hover { background: var(--accent); color: #fff; }
+.resume-upload-preview { min-height: 300px; border-top: none; cursor: default; }
+.resume-edit-editor { width: 100%; min-height: 360px; max-height: 55vh; overflow-y: auto; padding: 1rem 1.5rem; font-family: Arial, sans-serif; font-size: 0.85rem; line-height: 1.6; color: var(--text-mid); background: var(--input-bg); outline: none; border-top: 1px solid var(--card-border); border-bottom: 1px solid var(--card-border); }
+.resume-edit-editor:empty:before { content: attr(data-placeholder); color: var(--text-light); pointer-events: none; }
+.resume-edit-editor a, .resume-edit-editor a:visited { color: var(--blue); }
+.resume-edit-editor p { margin: 0 0 0.25rem; }
+.resume-edit-editor ul, .resume-edit-editor ol { margin: 0.25rem 0 0.5rem 1.6rem; padding: 0; }
+.resume-edit-editor li { margin-bottom: 0.2rem; }
+.resume-edit-editor h1 { font-size: 1.15rem; font-weight: 700; margin: 0 0 0.2rem; }
+.resume-edit-editor h2 { font-size: 1rem; font-weight: 700; margin: 1rem 0 0.3rem; padding-bottom: 0.2rem; border-bottom: 1px solid var(--card-border); }
+.resume-edit-editor h3 { font-size: 0.9rem; font-weight: 600; margin: 0.75rem 0 0.15rem; }
+.resume-edit-editor h4, .resume-edit-editor h5, .resume-edit-editor h6 { font-size: 0.85rem; font-weight: 600; margin: 0.5rem 0 0.1rem; }
+.resume-edit-footer { justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.resume-edit-char-count { font-size: 0.75rem; color: var(--text-light); }
+.resume-edit-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.resume-edit-clear:hover:not(:disabled) { background: var(--delete-hover-bg) !important; }
+
+/* ===== TAILOR RESUME BUTTON ===== */
+.description-section-controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.tailor-resume-btn { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); transition: all 0.15s; }
+.tailor-resume-btn:hover { background: var(--accent); color: #fff; }
+
+/* ===== TAILOR SOURCE TOGGLE ===== */
+.tailor-source-toggle { display: inline-flex; border: 1px solid var(--card-border); border-radius: 6px; overflow: hidden; }
+.tailor-source-btn { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.7rem; font-size: 0.78rem; font-weight: 500; color: var(--text-light); background: none; border: none; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.tailor-source-btn:not(:last-child) { border-right: 1px solid var(--card-border); }
+.tailor-source-btn:hover:not(:disabled) { background: var(--card-border); color: var(--text-mid); }
+.tailor-source-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+.tailor-source-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== TAILOR RESUME MODAL ===== */
+.tailor-resume-modal { width: 1060px; max-width: 95vw; max-height: 90vh; }
+.tailor-resume-subtitle { font-size: 0.8rem; color: var(--text-light); margin-top: 0.2rem; }
+.tailor-resume-body { flex: 1; min-height: 0; overflow-y: auto; min-height: 200px; }
+.tailor-resume-loading { display: flex; align-items: center; gap: 0.75rem; padding: 2rem; font-size: 0.9rem; color: var(--text-mid); }
+.tailor-resume-error { padding: 1rem; font-size: 0.85rem; color: var(--danger); background: var(--error-bg); border-radius: var(--radius); border: 1px solid var(--error-border); line-height: 1.5; }
+.tailor-resume-output { font-family: Arial, sans-serif; font-size: 0.85rem; line-height: 1.65; color: var(--text-mid); }
+.tailor-resume-output h2 { font-size: 1.1rem; font-weight: 700; margin: 0.5rem 0 0.25rem; }
+.tailor-resume-output h3 { font-size: 0.95rem; font-weight: 600; margin: 0.75rem 0 0.2rem; color: var(--text-dark); }
+.tailor-resume-output p { margin-bottom: 0.4rem; }
+.tailor-resume-output ul, .tailor-resume-output ol { margin: 0.3rem 0 0.3rem 1.4rem; }
+.tailor-resume-output li { margin-bottom: 0.2rem; }
+.tailor-resume-output hr { border: none; border-top: 1px solid var(--card-border); margin: 0.75rem 0; }
+
+/* ===== DOCX TAILOR STEP LIST ===== */
+.tailor-step-list { list-style: none; display: flex; flex-direction: column; gap: 1rem; padding: 1.5rem 0; }
+.tailor-step-item { display: flex; align-items: center; gap: 0.75rem; font-size: 0.95rem; color: var(--text-light); transition: color 0.2s; }
+.tailor-step-item.active { color: var(--text-dark); font-weight: 500; }
+.tailor-step-item.done { color: var(--accent); }
+.tailor-step-item.pending { color: var(--text-light); }
+.step-icon { font-size: 1rem; width: 1.1rem; text-align: center; flex-shrink: 0; }
+.step-icon-pending { opacity: 0.4; }
+.step-spinner { flex-shrink: 0; }
+.tailor-done-msg { display: flex; align-items: center; gap: 0.75rem; padding: 1.5rem 0; font-size: 0.95rem; color: var(--accent); font-weight: 500; }
+.tailor-done-icon { font-size: 1.25rem; }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
