@@ -45,15 +45,19 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     getAllJobs().then(jobs => {
-      setPipelineCount(
-        jobs.filter(j =>
-          j.applicationStage
-            ? j.applicationStage !== 'rejected'
-            : j.saved || j.applied
-        ).length
-      );
-    });
+      if (!cancelled) {
+        setPipelineCount(
+          jobs.filter(j =>
+            j.applicationStage
+              ? j.applicationStage !== 'rejected'
+              : j.saved || j.applied
+          ).length
+        );
+      }
+    }).catch(err => console.error('[App] pipelineCount fetch failed:', err));
+    return () => { cancelled = true; };
   }, [refreshTrigger]);
 
   return (
