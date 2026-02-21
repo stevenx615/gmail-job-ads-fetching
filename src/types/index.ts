@@ -1,3 +1,11 @@
+export type ApplicationStage =
+  | 'saved'
+  | 'applied'
+  | 'phone_screen'
+  | 'interview'
+  | 'offer'
+  | 'rejected';
+
 export interface JobBadges {
   responsibilities: string[];
   qualifications: string[];
@@ -21,6 +29,7 @@ export interface Job {
   read?: boolean;
   description?: string;
   badges?: JobBadges;
+  applicationStage?: ApplicationStage;
   createdAt?: unknown;
 }
 
