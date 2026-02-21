@@ -11,7 +11,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import type { Job, JobBadges, NewJob } from '../types';
+import type { Job, JobBadges, NewJob, ApplicationStage } from '../types';
 
 const COLLECTION_NAME = 'jobs';
 
@@ -319,4 +319,24 @@ export async function addJobIfNotExists(jobData: NewJob, cache?: DedupCache): Pr
   const exists = jobs.some(j => j.url === safeJob.url || (j.title === safeJob.title && j.company === safeJob.company));
   if (exists) return null;
   return addJob(safeJob);
+}
+
+export async function updateJobStage(id: string, stage: ApplicationStage): Promise<void> {
+  const jobDoc = doc(db, COLLECTION_NAME, id);
+  const update: Record<string, unknown> = { applicationStage: stage };
+  if (stage === 'applied') update.applied = true;
+  if (stage === 'saved') update.saved = true;
+  await updateDoc(jobDoc, update);
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j =>
+      j.id === id
+        ? {
+            ...j,
+            applicationStage: stage,
+            ...(stage === 'applied' ? { applied: true } : {}),
+            ...(stage === 'saved' ? { saved: true } : {}),
+          }
+        : j
+    );
+  }
 }
