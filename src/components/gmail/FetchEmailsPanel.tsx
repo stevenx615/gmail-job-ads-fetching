@@ -44,7 +44,7 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
   const [folder, setFolder] = useState('INBOX');
   const [label, setLabel] = useState('');
   const [shouldArchive, setShouldArchive] = useState(true);
-  const [unreadOnly, setUnreadOnly] = useState(true);
+  const [unreadOnly, setUnreadOnly] = useState(false);
 
   const [labels, setLabels] = useState<GmailLabel[]>([]);
   const [labelsLoaded, setLabelsLoaded] = useState(false);

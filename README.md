@@ -82,7 +82,7 @@ npm run dev
 
 ## Browser Extension
 
-The companion [Job Description Scraper](https://github.com/stevenx615/job-scraper-extension) Chrome extension fetches full job descriptions from LinkedIn, Indeed, and Glassdoor and saves them directly to your Firestore database. Descriptions appear on the dashboard in real-time.
+The companion [Job Description Scraper](https://github.com/stevenx615/job-scraper-extension) extension fetches full job descriptions from LinkedIn, Indeed, and Glassdoor and saves them directly to your Firestore database. Descriptions appear on the dashboard in real-time.
 
 - Scrape manually via the extension popup, or enable auto-fetch in **Settings → Job Management**
 - Supports background scraping — no need to stay on the job page

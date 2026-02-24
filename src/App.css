@@ -71,10 +71,10 @@
 }
 
 [data-theme="dark"] {
-  --nav-bg: #0a1628;
+  --nav-bg: #111625;
   --hero-bg: #060f1a;
   --body-bg: #111827;
-  --card-bg: #1e293b;
+  --card-bg: #18212f;
   --card-border: #334155;
   --card-shadow: 0 1px 3px rgba(0,0,0,0.3);
   --text-dark: #f1f5f9;

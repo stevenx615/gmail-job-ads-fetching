@@ -36,7 +36,7 @@ export const glassdoorParser: EmailParser = {
         const text = cleanText(p.textContent ?? '');
         if (!text) return;
 
-        // Title is the bold/large one
+        // Title is the bold/large one (inline style) or first paragraph (class-based style)
         if (!title && style.includes('font-weight:600')) {
           title = text;
         } else {
@@ -44,10 +44,27 @@ export const glassdoorParser: EmailParser = {
         }
       });
 
+      // Fallback: if no inline font-weight found, first paragraph is the title
+      if (!title && otherTexts.length > 0) {
+        title = otherTexts.shift()!;
+      }
+
       if (!title || title.length < 3) return;
 
-      // Classify remaining texts by content, not style
+      // Company name is in a <span>, not a <p> (Glassdoor email layout)
       let company = '';
+      for (const span of link.querySelectorAll('span')) {
+        if (span.querySelector('span')) continue; // skip container spans
+        const text = cleanText(span.textContent ?? '');
+        if (!text) continue;
+        if (/^\d(\.\d)?\s*[★☆]?$/.test(text)) continue; // skip ratings like "4.3 ★"
+        if (/^easy\s+apply$/i.test(text)) continue;
+        if (/^\d+[dhm]$/.test(text)) continue; // skip age labels like "3d"
+        company = text;
+        break;
+      }
+
+      // Location comes from remaining paragraph texts
       let location = '';
 
       for (const text of otherTexts) {
@@ -57,10 +74,10 @@ export const glassdoorParser: EmailParser = {
         if (/[\$€£]|per\s+hour|salary|estimate/i.test(text)) continue;
         // Skip "Easy Apply" or action labels
         if (/^easy\s+apply$/i.test(text.trim())) continue;
+        // Skip age labels like "3d", "2h"
+        if (/^\d+[dhm]$/.test(text.trim())) continue;
 
-        if (!company) {
-          company = text;
-        } else if (!location) {
+        if (!location) {
           location = text;
         }
       }
