@@ -7,6 +7,7 @@ import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
 import type { Job, JobBadges } from '../types';
 import { tailorResume, tailorResumeDocx } from '../services/aiService';
 import type { TailorResumeResult, DocxSection, DocxReplacement } from '../services/aiService';
+
 const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || '8000';
 
 interface DashboardProps {
