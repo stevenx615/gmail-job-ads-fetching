@@ -534,21 +534,21 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
                       <input
                         type="text"
                         className="settings-input"
-                        placeholder={`http://localhost:8000/api/proxy/${settings.aiProvider}`}
+                        placeholder={`http://localhost:${import.meta.env.VITE_BACKEND_PORT || '8000'}/api/proxy/${settings.aiProvider}`}
                         value={settings.aiProxyUrl}
                         onChange={e => handleChange('aiProxyUrl', e.target.value)}
                       />
                       <button
                         className="settings-btn settings-btn-bulk"
                         type="button"
-                        onClick={() => handleChange('aiProxyUrl', `http://localhost:8000/api/proxy/${settings.aiProvider}`)}
+                        onClick={() => handleChange('aiProxyUrl', `http://localhost:${import.meta.env.VITE_BACKEND_PORT || '8000'}/api/proxy/${settings.aiProvider}`)}
                       >
                         Use Local
                       </button>
                     </div>
                     <span className="settings-ai-hint">
                       {settings.aiProvider === 'openai' ? 'OpenAI' : 'Anthropic'} blocks direct browser requests (CORS).
-                      Click <strong>Use Local</strong> to route through the local backend — requires the backend to be running (<code>uvicorn main:app --reload --port 8000</code>).
+                      Click <strong>Use Local</strong> to route through the local backend — requires the backend to be running (<code>uvicorn main:app --reload --port {import.meta.env.VITE_BACKEND_PORT || '8000'}</code>).
                     </span>
                   </div>
                 )}
