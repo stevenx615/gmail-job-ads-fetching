@@ -7,6 +7,7 @@ import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
 import type { Job, JobBadges } from '../types';
 import { tailorResume, tailorResumeDocx } from '../services/aiService';
 import type { TailorResumeResult, DocxSection, DocxReplacement } from '../services/aiService';
+const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || '8000';
 
 interface DashboardProps {
   refreshTrigger: number;
@@ -386,7 +387,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       setTailorError(
         msg.includes('Failed to fetch') || msg.includes('NetworkError')
-          ? 'Backend not available. Start the Python backend: cd backend && uvicorn main:app --reload --port 8000'
+          ? `Backend not available. Start the Python backend: cd backend && uvicorn main:app --reload --port ${BACKEND_PORT}`
           : `Failed to extract sections: ${msg}`
       );
       setTailorStep('idle');
