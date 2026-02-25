@@ -193,7 +193,7 @@ export function FetchEmailsPanel({ onFetchComplete }: FetchEmailsPanelProps) {
               <div className="modal-section">
                 <label className="modal-label">Date Range</label>
                 <div className="modal-date-quick">
-                  {([['Today', 0], ['Last 7 Days', 7], ['Last 30 Days', 30]] as const).map(([label, days]) => {
+                  {([['Today', 0], ['Last 3 Days', 3], ['Last 7 Days', 7], ['Last 30 Days', 30]] as const).map(([label, days]) => {
                     const d = new Date();
                     const end = getTodayString();
                     const start = days === 0 ? end : toLocalDateString(new Date(d.getFullYear(), d.getMonth(), d.getDate() - days));
