@@ -82,6 +82,8 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
       description: data.description || undefined,
       badges: data.badges || undefined,
       applicationStage: data.applicationStage as ApplicationStage | undefined,
+      notes: data.notes ?? undefined,
+      followUpDate: data.followUpDate ?? undefined,
       emailId: data.emailId,
       dateReceived: data.dateReceived?.toDate ? data.dateReceived.toDate().toISOString() : (data.dateReceived || new Date().toISOString()),
       createdAt: data.createdAt?.toDate?.() || new Date(),
@@ -155,6 +157,8 @@ export function onJobsChanged(onUpdate: (jobId: string, data: Partial<Job>) => v
           read: data.read || false,
           badges: data.badges || undefined,
           applicationStage: data.applicationStage as ApplicationStage | undefined,
+          notes: data.notes ?? undefined,
+          followUpDate: data.followUpDate ?? undefined,
         });
       }
     });
@@ -340,5 +344,21 @@ export async function updateJobStage(id: string, stage: ApplicationStage): Promi
           }
         : j
     );
+  }
+}
+
+/**
+ * Updates notes and/or followUpDate for a job.
+ * These fields have no side effects, unlike applicationStage.
+ * For stage changes, always use updateJobStage instead.
+ */
+export async function updateJobFields(
+  id: string,
+  fields: Partial<Pick<Job, 'notes' | 'followUpDate'>>
+): Promise<void> {
+  const jobDoc = doc(db, COLLECTION_NAME, id);
+  await updateDoc(jobDoc, fields as Record<string, unknown>);
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => j.id === id ? { ...j, ...fields } : j);
   }
 }
