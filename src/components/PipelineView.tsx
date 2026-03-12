@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getAllJobs, updateJobStage } from '../services/jobService';
+import { getAllJobs, updateJobStage, updateJobFields } from '../services/jobService';
 import type { Job, ApplicationStage } from '../types';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STAGES: ApplicationStage[] = [
   'saved', 'applied', 'phone_screen', 'interview', 'offer', 'rejected',
@@ -15,7 +17,7 @@ const STAGE_LABELS: Record<ApplicationStage, string> = {
   rejected: 'Rejected',
 };
 
-const STAGE_DOT_CLASS: Record<ApplicationStage, string> = {
+const STAGE_COLOR_CLASS: Record<ApplicationStage, string> = {
   saved: 'stage-dot-saved',
   applied: 'stage-dot-applied',
   phone_screen: 'stage-dot-phone',
@@ -24,14 +26,10 @@ const STAGE_DOT_CLASS: Record<ApplicationStage, string> = {
   rejected: 'stage-dot-rejected',
 };
 
-const NEXT_STAGE: Partial<Record<ApplicationStage, ApplicationStage>> = {
-  saved: 'applied',
-  applied: 'phone_screen',
-  phone_screen: 'interview',
-  interview: 'offer',
-  offer: undefined,
-  rejected: undefined,
-};
+type SortField = 'title' | 'company' | 'stage' | 'dateReceived' | 'followUpDate';
+type SortDir = 'asc' | 'desc';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getEffectiveStage(job: Job): ApplicationStage | null {
   if (job.applicationStage) return job.applicationStage;
@@ -40,22 +38,409 @@ function getEffectiveStage(job: Job): ApplicationStage | null {
   return null;
 }
 
+function stageOrder(stage: ApplicationStage | null): number {
+  if (!stage) return 99;
+  return STAGES.indexOf(stage);
+}
+
+function truncateNotes(notes: string | undefined, max = 60): string {
+  if (!notes) return '';
+  return notes.length > max ? notes.slice(0, max) + '…' : notes;
+}
+
+// ─── PipelineStatsBar ─────────────────────────────────────────────────────────
+
+interface StatsBarProps {
+  jobs: Job[];
+}
+
+function PipelineStatsBar({ jobs }: StatsBarProps) {
+  const counts: Record<ApplicationStage, number> = {
+    saved: 0, applied: 0, phone_screen: 0, interview: 0, offer: 0, rejected: 0,
+  };
+  let total = 0;
+  for (const job of jobs) {
+    const stage = getEffectiveStage(job);
+    if (!stage) continue;
+    counts[stage]++;
+    if (stage !== 'rejected') total++;
+  }
+
+  return (
+    <div className="pipeline-stats-bar">
+      <div className="pipeline-stat-badge pipeline-stat-total">
+        <span className="pipeline-stat-count">{total}</span>
+        <span className="pipeline-stat-label">Total</span>
+      </div>
+      {STAGES.map(stage => (
+        <div key={stage} className={`pipeline-stat-badge ${STAGE_COLOR_CLASS[stage]}`}>
+          <span className="pipeline-stat-count">{counts[stage]}</span>
+          <span className="pipeline-stat-label">{STAGE_LABELS[stage]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── PipelineTable ────────────────────────────────────────────────────────────
+
+interface EditingCell {
+  rowId: string;
+  field: 'stage' | 'notes' | 'followUpDate';
+}
+
+interface TableProps {
+  jobs: Job[];
+  onJobUpdate: (id: string, patch: Partial<Job>) => void;
+}
+
+function PipelineTable({ jobs, onJobUpdate }: TableProps) {
+  // ── Filter state ──
+  const [search, setSearch] = useState('');
+  const [stageFilter, setStageFilter] = useState<ApplicationStage | 'all'>('all');
+  const [dateRange, setDateRange] = useState<'all' | '7' | '30' | '90'>('30');
+  const [hideRejected, setHideRejected] = useState(true);
+  const [activeOnly, setActiveOnly] = useState(false);
+
+  // ── Sort state ──
+  const [sortField, setSortField] = useState<SortField>('dateReceived');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  // ── Inline editing ──
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [cellErrors, setCellErrors] = useState<Record<string, string>>({});
+
+  // Effective hideRejected = activeOnly || hideRejected
+  const effectiveHideRejected = activeOnly || hideRejected;
+
+  // ── Filtering ──
+  const now = new Date();
+  const filtered = jobs.filter(job => {
+    const stage = getEffectiveStage(job);
+    if (!stage) return false;
+    if (effectiveHideRejected && stage === 'rejected') return false;
+    if (activeOnly && stage === 'saved') return false;
+    if (stageFilter !== 'all' && stage !== stageFilter) return false;
+    if (dateRange !== 'all') {
+      const days = parseInt(dateRange);
+      const received = new Date(job.dateReceived);
+      const diffDays = (now.getTime() - received.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays > days) return false;
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      if (!job.title.toLowerCase().includes(q) && !job.company.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  // ── Sorting ──
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    switch (sortField) {
+      case 'title':    cmp = a.title.localeCompare(b.title); break;
+      case 'company':  cmp = a.company.localeCompare(b.company); break;
+      case 'stage':    cmp = stageOrder(getEffectiveStage(a)) - stageOrder(getEffectiveStage(b)); break;
+      case 'dateReceived': cmp = new Date(a.dateReceived).getTime() - new Date(b.dateReceived).getTime(); break;
+      case 'followUpDate':
+        cmp = (a.followUpDate ?? '').localeCompare(b.followUpDate ?? ''); break;
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIndicator = (field: SortField) =>
+    sortField === field ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕';
+
+  const clearFilters = () => {
+    setSearch('');
+    setStageFilter('all');
+    setDateRange('30');
+    setHideRejected(true);
+    setActiveOnly(false);
+  };
+
+  // ── Inline edit helpers ──
+  const startEdit = (rowId: string, field: EditingCell['field'], currentValue: string) => {
+    setEditingCell({ rowId, field });
+    setEditValue(currentValue);
+  };
+
+  const cancelEdit = () => {
+    setEditingCell(null);
+    setEditValue('');
+  };
+
+  // commitEdit handles notes and followUpDate only.
+  // Stage changes go directly through the select onChange handler (see below)
+  // to avoid the React async state issue where editValue would be stale.
+  const commitEdit = async (job: Job) => {
+    if (!editingCell) return;
+    const { rowId, field } = editingCell;
+    if (field === 'stage') return; // handled in select onChange
+    const errorKey = `${rowId}-${field}`;
+    const patch: Partial<Job> = field === 'notes'
+      ? { notes: editValue || undefined }
+      : { followUpDate: editValue || undefined };
+    setEditingCell(null);
+    onJobUpdate(rowId, patch);
+    try {
+      await updateJobFields(rowId, patch as Partial<Pick<Job, 'notes' | 'followUpDate'>>);
+    } catch {
+      onJobUpdate(rowId, field === 'notes' ? { notes: job.notes } : { followUpDate: job.followUpDate });
+      setCellErrors(e => ({ ...e, [errorKey]: `Failed to update ${field}` }));
+    }
+  };
+
+  const formatDate = (iso: string) =>
+    iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
+
+  if (sorted.length === 0) {
+    return (
+      <div className="pipeline-table-empty">
+        <p>No applications match the current filters.</p>
+        <button className="pipeline-clear-filters" onClick={clearFilters}>Clear filters</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pipeline-table-wrapper">
+      {/* Filter Bar */}
+      <div className="pipeline-filter-bar">
+        <input
+          className="pipeline-search"
+          type="text"
+          placeholder="Search role or company…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <label className="pipeline-filter-label">
+          Stage
+          <select
+            className="pipeline-filter-select"
+            value={stageFilter}
+            onChange={e => setStageFilter(e.target.value as ApplicationStage | 'all')}
+          >
+            <option value="all">All</option>
+            {STAGES.map(s => (
+              <option key={s} value={s}>{STAGE_LABELS[s]}</option>
+            ))}
+          </select>
+        </label>
+        <label className="pipeline-filter-label">
+          Date
+          <select
+            className="pipeline-filter-select"
+            value={dateRange}
+            onChange={e => setDateRange(e.target.value as typeof dateRange)}
+          >
+            <option value="all">All time</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </label>
+        <button
+          className={`pipeline-filter-toggle${effectiveHideRejected && !activeOnly ? ' active' : ''}`}
+          onClick={() => !activeOnly && setHideRejected(v => !v)}
+          disabled={activeOnly}
+          title={activeOnly ? 'Forced on by Active Only' : undefined}
+        >
+          Hide Rejected
+        </button>
+        <button
+          className={`pipeline-filter-toggle${activeOnly ? ' active' : ''}`}
+          onClick={() => setActiveOnly(v => !v)}
+        >
+          Active Only
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="pipeline-table-scroll">
+        <table className="pipeline-table">
+          <thead>
+            <tr>
+              <th className="pt-sortable" onClick={() => toggleSort('title')}>Role{sortIndicator('title')}</th>
+              <th className="pt-sortable" onClick={() => toggleSort('company')}>Company{sortIndicator('company')}</th>
+              <th>Location</th>
+              <th>Source</th>
+              <th>Type</th>
+              <th className="pt-sortable" onClick={() => toggleSort('stage')}>Stage{sortIndicator('stage')}</th>
+              <th className="pt-sortable" onClick={() => toggleSort('dateReceived')}>Applied{sortIndicator('dateReceived')}</th>
+              <th className="pt-sortable" onClick={() => toggleSort('followUpDate')}>Follow-up{sortIndicator('followUpDate')}</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(job => {
+              const stage = getEffectiveStage(job);
+              const isEditingStage = editingCell?.rowId === job.id && editingCell.field === 'stage';
+              const isEditingNotes = editingCell?.rowId === job.id && editingCell.field === 'notes';
+              const isEditingFollowUp = editingCell?.rowId === job.id && editingCell.field === 'followUpDate';
+
+              return (
+                <tr key={job.id} className="pt-row">
+                  {/* Role */}
+                  <td className="pt-role">
+                    {job.url
+                      ? <a href={job.url} target="_blank" rel="noopener noreferrer">{job.title}</a>
+                      : job.title}
+                  </td>
+
+                  {/* Company */}
+                  <td className="pt-company">{job.company}</td>
+
+                  {/* Location */}
+                  <td className="pt-location">{job.location || '—'}</td>
+
+                  {/* Source */}
+                  <td className="pt-source">
+                    <span className={`source-badge source-${job.source}`}>{job.source}</span>
+                  </td>
+
+                  {/* Type */}
+                  <td className="pt-type">
+                    <span className="type-badge">{job.type || '—'}</span>
+                  </td>
+
+                  {/* Stage — inline editable */}
+                  <td className="pt-stage">
+                    {isEditingStage ? (
+                      <select
+                        className="pt-stage-select"
+                        value={editValue}
+                        autoFocus
+                        onChange={async e => {
+                          // Do NOT use commitEdit here — editValue state is stale inside onChange.
+                          // Call updateJobStage directly with e.target.value.
+                          const newStage = e.target.value as ApplicationStage;
+                          const oldStage = getEffectiveStage(job);
+                          setEditingCell(null);
+                          onJobUpdate(job.id, { applicationStage: newStage });
+                          try {
+                            await updateJobStage(job.id, newStage);
+                          } catch {
+                            onJobUpdate(job.id, { applicationStage: oldStage ?? undefined });
+                            setCellErrors(prev => ({ ...prev, [`${job.id}-stage`]: 'Failed to update stage' }));
+                          }
+                        }}
+                        onBlur={cancelEdit}
+                      >
+                        {STAGES.map(s => (
+                          <option key={s} value={s}>{STAGE_LABELS[s]}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        className={`pt-stage-badge ${stage ? STAGE_COLOR_CLASS[stage] : ''}`}
+                        onClick={() => startEdit(job.id, 'stage', stage ?? 'saved')}
+                        title="Click to change stage"
+                      >
+                        {stage ? STAGE_LABELS[stage] : '—'} ▾
+                      </button>
+                    )}
+                    {cellErrors[`${job.id}-stage`] && (
+                      <span className="pt-cell-error">{cellErrors[`${job.id}-stage`]}</span>
+                    )}
+                  </td>
+
+                  {/* Date Applied */}
+                  <td className="pt-date">{formatDate(job.dateReceived)}</td>
+
+                  {/* Follow-up Date — inline editable */}
+                  <td className="pt-followup">
+                    {isEditingFollowUp ? (
+                      <input
+                        type="date"
+                        className="pt-date-input"
+                        value={editValue}
+                        autoFocus
+                        onChange={e => setEditValue(e.target.value)}
+                        onBlur={() => commitEdit(job)}
+                        onKeyDown={e => { if (e.key === 'Escape') cancelEdit(); }}
+                      />
+                    ) : (
+                      <span
+                        className="pt-followup-value"
+                        onClick={() => startEdit(job.id, 'followUpDate', job.followUpDate ?? '')}
+                        title="Click to set follow-up date"
+                      >
+                        {job.followUpDate ? formatDate(job.followUpDate) : <span className="pt-empty-cell">—</span>}
+                      </span>
+                    )}
+                    {cellErrors[`${job.id}-followUpDate`] && (
+                      <span className="pt-cell-error">{cellErrors[`${job.id}-followUpDate`]}</span>
+                    )}
+                  </td>
+
+                  {/* Notes — inline editable */}
+                  <td className="pt-notes">
+                    {isEditingNotes ? (
+                      <input
+                        type="text"
+                        className="pt-notes-input"
+                        value={editValue}
+                        maxLength={2000}
+                        autoFocus
+                        onChange={e => setEditValue(e.target.value)}
+                        onBlur={() => commitEdit(job)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.currentTarget.blur(); }
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className={`pt-notes-value${!job.notes ? ' pt-empty-cell' : ''}`}
+                        onClick={() => startEdit(job.id, 'notes', job.notes ?? '')}
+                        title={job.notes ?? 'Click to add note'}
+                      >
+                        {job.notes ? truncateNotes(job.notes) : 'Add note…'}
+                      </span>
+                    )}
+                    {cellErrors[`${job.id}-notes`] && (
+                      <span className="pt-cell-error">{cellErrors[`${job.id}-notes`]}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pipeline-table-footer">
+        Showing {sorted.length} of {jobs.length} pipeline applications
+      </div>
+    </div>
+  );
+}
+
+// ─── PipelineView (exported) ──────────────────────────────────────────────────
+
 interface PipelineViewProps {
   refreshTrigger: number;
 }
 
 export function PipelineView({ refreshTrigger }: PipelineViewProps) {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [allJobs, setAllJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState<Set<ApplicationStage>>(
-    new Set(['rejected'])
-  );
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
     const all = await getAllJobs();
-    setJobs(all.filter(j => getEffectiveStage(j) !== null));
+    setAllJobs(all.filter(j => getEffectiveStage(j) !== null));
     setLoading(false);
   }, []);
 
@@ -63,37 +448,16 @@ export function PipelineView({ refreshTrigger }: PipelineViewProps) {
     loadJobs();
   }, [loadJobs, refreshTrigger]);
 
-  const toggleCollapse = (stage: ApplicationStage) => {
-    setCollapsed(prev => {
-      const next = new Set(prev);
-      if (next.has(stage)) next.delete(stage);
-      else next.add(stage);
-      return next;
-    });
-  };
-
-  const moveJob = async (job: Job, stage: ApplicationStage) => {
-    // Optimistic update
-    setJobs(prev =>
-      prev.map(j => j.id === job.id ? { ...j, applicationStage: stage } : j)
-    );
-    setRowErrors(prev => { const n = { ...prev }; delete n[job.id]; return n; });
-    try {
-      await updateJobStage(job.id, stage);
-    } catch {
-      // Revert on failure
-      setJobs(prev =>
-        prev.map(j => j.id === job.id ? job : j)
-      );
-      setRowErrors(prev => ({ ...prev, [job.id]: 'Failed to update stage. Try again.' }));
-    }
-  };
+  // Optimistic in-place job update (used by PipelineTable on inline edits)
+  const handleJobUpdate = useCallback((id: string, patch: Partial<Job>) => {
+    setAllJobs(prev => prev.map(j => j.id === id ? { ...j, ...patch } : j));
+  }, []);
 
   if (loading) {
     return <div className="pipeline-view"><p className="pipeline-empty">Loading…</p></div>;
   }
 
-  if (jobs.length === 0) {
+  if (allJobs.length === 0) {
     return (
       <div className="pipeline-view">
         <h2>Pipeline</h2>
@@ -104,89 +468,10 @@ export function PipelineView({ refreshTrigger }: PipelineViewProps) {
     );
   }
 
-  const grouped = Object.fromEntries(
-    STAGES.map(stage => [
-      stage,
-      jobs.filter(j => getEffectiveStage(j) === stage),
-    ])
-  ) as Record<ApplicationStage, Job[]>;
-
-  const activeCount = jobs.filter(j => getEffectiveStage(j) !== 'rejected').length;
-
   return (
     <div className="pipeline-view">
-      <h2>Pipeline <span className="pipeline-stage-count">{activeCount} active</span></h2>
-      {STAGES.map(stage => {
-        const stageJobs = grouped[stage];
-        const isCollapsed = collapsed.has(stage);
-        return (
-          <div key={stage} className="pipeline-stage">
-            <button
-              className="pipeline-stage-header"
-              onClick={() => toggleCollapse(stage)}
-              aria-expanded={!isCollapsed}
-            >
-              <span className={`pipeline-stage-dot ${STAGE_DOT_CLASS[stage]}`} />
-              <span className="pipeline-stage-label">{STAGE_LABELS[stage]}</span>
-              <span className="pipeline-stage-count">{stageJobs.length}</span>
-              <span className={`pipeline-chevron${isCollapsed ? '' : ' open'}`}>▶</span>
-            </button>
-
-            {!isCollapsed && stageJobs.length > 0 && (
-              <div className="pipeline-jobs">
-                {stageJobs.map(job => {
-                  const nextStage = NEXT_STAGE[stage];
-                  return (
-                    <div key={job.id}>
-                      <div className="pipeline-job-row">
-                        <div className="pipeline-job-info">
-                          <div className="pipeline-job-title">
-                            {job.url ? (
-                              <a href={job.url} target="_blank" rel="noopener noreferrer">
-                                {job.title}
-                              </a>
-                            ) : (
-                              job.title
-                            )}
-                          </div>
-                          <div className="pipeline-job-meta">
-                            {job.company}
-                            {job.location ? ` · ${job.location}` : ''}
-                            {` · ${job.source}`}
-                          </div>
-                        </div>
-                        <div className="pipeline-job-actions">
-                          <select
-                            className="pipeline-stage-select"
-                            value={stage}
-                            onChange={e => moveJob(job, e.target.value as ApplicationStage)}
-                          >
-                            {STAGES.map(s => (
-                              <option key={s} value={s}>{STAGE_LABELS[s]}</option>
-                            ))}
-                          </select>
-                          {nextStage && (
-                            <button
-                              className="pipeline-next-btn"
-                              onClick={() => moveJob(job, nextStage)}
-                              title={`Move to ${STAGE_LABELS[nextStage]}`}
-                            >
-                              → {STAGE_LABELS[nextStage]}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {rowErrors[job.id] && (
-                        <div className="pipeline-row-error">{rowErrors[job.id]}</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      <PipelineStatsBar jobs={allJobs} />
+      <PipelineTable jobs={allJobs} onJobUpdate={handleJobUpdate} />
     </div>
   );
 }
