@@ -115,10 +115,13 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
   const effectiveHideRejected = activeOnly || hideRejected;
 
   // ── Filtering ──
+  const nowMs = Date.now();
+  /* eslint-disable react-hooks/exhaustive-deps */
   const cutoffMs = useMemo(
-    () => dateRange !== 'all' ? Date.now() - parseInt(dateRange) * 86400000 : null,
-    [dateRange]
+    () => dateRange !== 'all' ? nowMs - parseInt(dateRange) * 86400000 : null,
+    [dateRange] // nowMs intentionally omitted: recompute only when dateRange changes
   );
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const filtered = jobs.filter(job => {
     const stage = getEffectiveStage(job);
