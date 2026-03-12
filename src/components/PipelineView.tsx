@@ -336,6 +336,7 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
                           onJobUpdate(job.id, { applicationStage: newStage });
                           try {
                             await updateJobStage(job.id, newStage);
+                            setCellErrors(prev => { const next = { ...prev }; delete next[`${job.id}-stage`]; return next; });
                           } catch {
                             onJobUpdate(job.id, { applicationStage: oldStage ?? undefined });
                             setCellErrors(prev => ({ ...prev, [`${job.id}-stage`]: 'Failed to update stage' }));
