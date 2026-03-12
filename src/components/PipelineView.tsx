@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getAllJobs, updateJobStage, updateJobFields } from '../services/jobService';
 import type { Job, ApplicationStage } from '../types';
 
@@ -115,18 +115,19 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
   const effectiveHideRejected = activeOnly || hideRejected;
 
   // ── Filtering ──
-  const now = new Date();
+  const cutoffMs = useMemo(
+    () => dateRange !== 'all' ? Date.now() - parseInt(dateRange) * 86400000 : null,
+    [dateRange]
+  );
+
   const filtered = jobs.filter(job => {
     const stage = getEffectiveStage(job);
     if (!stage) return false;
     if (effectiveHideRejected && stage === 'rejected') return false;
     if (activeOnly && stage === 'saved') return false;
     if (stageFilter !== 'all' && stage !== stageFilter) return false;
-    if (dateRange !== 'all') {
-      const days = parseInt(dateRange);
-      const received = new Date(job.dateReceived);
-      const diffDays = (now.getTime() - received.getTime()) / (1000 * 60 * 60 * 24);
-      if (diffDays > days) return false;
+    if (cutoffMs !== null) {
+      if (new Date(job.dateReceived).getTime() < cutoffMs) return false;
     }
     if (search) {
       const q = search.toLowerCase();
@@ -187,6 +188,9 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     if (!editingCell) return;
     const { rowId, field } = editingCell;
     if (field === 'stage') return; // handled in select onChange
+    // Capture pre-optimistic values BEFORE calling onJobUpdate so revert is always correct
+    const revertNotes = job.notes;
+    const revertFollowUpDate = job.followUpDate;
     const errorKey = `${rowId}-${field}`;
     const patch: Partial<Job> = field === 'notes'
       ? { notes: editValue || undefined }
@@ -195,8 +199,10 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     onJobUpdate(rowId, patch);
     try {
       await updateJobFields(rowId, patch as Partial<Pick<Job, 'notes' | 'followUpDate'>>);
+      // Clear any previous error for this cell on success
+      setCellErrors(e => { const next = { ...e }; delete next[errorKey]; return next; });
     } catch {
-      onJobUpdate(rowId, field === 'notes' ? { notes: job.notes } : { followUpDate: job.followUpDate });
+      onJobUpdate(rowId, field === 'notes' ? { notes: revertNotes } : { followUpDate: revertFollowUpDate });
       setCellErrors(e => ({ ...e, [errorKey]: `Failed to update ${field}` }));
     }
   };
@@ -277,7 +283,7 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
               <th>Source</th>
               <th>Type</th>
               <th className="pt-sortable" onClick={() => toggleSort('stage')}>Stage{sortIndicator('stage')}</th>
-              <th className="pt-sortable" onClick={() => toggleSort('dateReceived')}>Applied{sortIndicator('dateReceived')}</th>
+              <th className="pt-sortable" onClick={() => toggleSort('dateReceived')}>Received{sortIndicator('dateReceived')}</th>
               <th className="pt-sortable" onClick={() => toggleSort('followUpDate')}>Follow-up{sortIndicator('followUpDate')}</th>
               <th>Notes</th>
             </tr>
