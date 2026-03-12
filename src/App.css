@@ -1048,9 +1048,13 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
   background: var(--tag-bg);
   color: var(--text-mid);
 }
+.source-badge.source-linkedin { background: var(--source-linkedin-bg); color: var(--source-linkedin-color); }
+.source-badge.source-indeed { background: var(--source-indeed-bg); color: var(--source-indeed-color); }
+.source-badge.source-glassdoor { background: var(--source-glassdoor-bg); color: var(--source-glassdoor-color); }
+.source-badge.source-other { background: var(--source-other-bg); color: #fff; }
 
 /* Type badge */
-.type-badge {
+.pipeline-table .type-badge {
   display: inline-block;
   padding: 2px 7px;
   border-radius: 4px;
