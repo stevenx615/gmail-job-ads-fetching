@@ -32,3 +32,6 @@ backend/__pycache__
 *.njsproj
 *.sln
 *.sw?
+
+# Visual companion brainstorm files
+.superpowers/
