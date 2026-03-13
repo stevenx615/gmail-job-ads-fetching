@@ -9,6 +9,7 @@ import {
   orderBy,
   serverTimestamp,
   onSnapshot,
+  deleteField,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { Job, JobBadges, NewJob, ApplicationStage } from '../types';
@@ -82,6 +83,7 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
       description: data.description || undefined,
       badges: data.badges || undefined,
       applicationStage: data.applicationStage as ApplicationStage | undefined,
+      stageDate: data.stageDate ?? undefined,
       notes: data.notes ?? undefined,
       followUpDate: data.followUpDate ?? undefined,
       emailId: data.emailId,
@@ -157,6 +159,7 @@ export function onJobsChanged(onUpdate: (jobId: string, data: Partial<Job>) => v
           read: data.read || false,
           badges: data.badges || undefined,
           applicationStage: data.applicationStage as ApplicationStage | undefined,
+          stageDate: data.stageDate ?? undefined,
           notes: data.notes ?? undefined,
           followUpDate: data.followUpDate ?? undefined,
         });
@@ -203,9 +206,18 @@ export async function toggleJobSaved(id: string, saved: boolean): Promise<void> 
 
 export async function toggleJobApplied(id: string, applied: boolean): Promise<void> {
   const jobDoc = doc(db, COLLECTION_NAME, id);
-  await updateDoc(jobDoc, { applied });
+  const update: Record<string, unknown> = { applied };
+  if (applied) {
+    update.applicationStage = 'applied';
+    update.stageDate = new Date().toISOString().slice(0, 10);
+  }
+  await updateDoc(jobDoc, update);
   if (jobsCache) {
-    jobsCache = jobsCache.map(j => j.id === id ? { ...j, applied } : j);
+    jobsCache = jobsCache.map(j =>
+      j.id === id
+        ? { ...j, applied, ...(applied ? { applicationStage: 'applied' as ApplicationStage, stageDate: new Date().toISOString().slice(0, 10) } : {}) }
+        : j
+    );
   }
 }
 
@@ -327,9 +339,9 @@ export async function addJobIfNotExists(jobData: NewJob, cache?: DedupCache): Pr
   return addJob(safeJob);
 }
 
-export async function updateJobStage(id: string, stage: ApplicationStage): Promise<void> {
+export async function updateJobStage(id: string, stage: ApplicationStage, stageDate?: string): Promise<void> {
   const jobDoc = doc(db, COLLECTION_NAME, id);
-  const update: Record<string, unknown> = { applicationStage: stage };
+  const update: Record<string, unknown> = { applicationStage: stage, stageDate: stageDate ?? new Date().toISOString().slice(0, 10) };
   if (stage === 'applied') update.applied = true;
   if (stage === 'saved') update.saved = true;
   await updateDoc(jobDoc, update);
@@ -339,9 +351,26 @@ export async function updateJobStage(id: string, stage: ApplicationStage): Promi
         ? {
             ...j,
             applicationStage: stage,
+            stageDate: stageDate ?? new Date().toISOString().slice(0, 10),
             ...(stage === 'applied' ? { applied: true } : {}),
             ...(stage === 'saved' ? { saved: true } : {}),
           }
+        : j
+    );
+  }
+}
+
+export async function removeFromApplications(id: string): Promise<void> {
+  const jobDoc = doc(db, COLLECTION_NAME, id);
+  await updateDoc(jobDoc, {
+    applied: false,
+    applicationStage: deleteField(),
+    stageDate: deleteField(),
+  });
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j =>
+      j.id === id
+        ? { ...j, applied: false, applicationStage: undefined, stageDate: undefined }
         : j
     );
   }
@@ -357,7 +386,11 @@ export async function updateJobFields(
   fields: Partial<Pick<Job, 'notes' | 'followUpDate'>>
 ): Promise<void> {
   const jobDoc = doc(db, COLLECTION_NAME, id);
-  await updateDoc(jobDoc, fields as Record<string, unknown>);
+  const firestoreFields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    firestoreFields[key] = value === undefined ? deleteField() : value;
+  }
+  await updateDoc(jobDoc, firestoreFields);
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === id ? { ...j, ...fields } : j);
   }

@@ -3,7 +3,7 @@ import { GmailAuthProvider } from './context/GmailAuthContext';
 import { GmailConnectButton } from './components/gmail/GmailConnectButton';
 import { FetchEmailsPanel } from './components/gmail/FetchEmailsPanel';
 import { Dashboard } from './components/Dashboard';
-import { PipelineView } from './components/PipelineView';
+import { ApplicationsView } from './components/PipelineView';
 import { Settings } from './components/Settings';
 import { getSettings } from './services/settingsService';
 import { getAllJobs } from './services/jobService';
@@ -12,8 +12,8 @@ import './App.css';
 function AppContent() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'pipeline'>('dashboard');
-  const [pipelineCount, setPipelineCount] = useState(0);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'applications'>('dashboard');
+  const [applicationsCount, setApplicationsCount] = useState(0);
 
   // Apply theme to <html> element
   useEffect(() => {
@@ -48,15 +48,14 @@ function AppContent() {
     let cancelled = false;
     getAllJobs().then(jobs => {
       if (!cancelled) {
-        setPipelineCount(
-          jobs.filter(j =>
-            j.applicationStage
-              ? j.applicationStage !== 'rejected'
-              : j.saved || j.applied
-          ).length
+        setApplicationsCount(
+          jobs.filter(j => {
+            const stage = j.applicationStage ?? (j.applied ? 'applied' : j.saved ? 'saved' : null);
+            return stage !== null && stage !== 'saved' && stage !== 'rejected';
+          }).length
         );
       }
-    }).catch(err => console.error('[App] pipelineCount fetch failed:', err));
+    }).catch(err => console.error('[App] applicationsCount fetch failed:', err));
     return () => { cancelled = true; };
   }, [refreshTrigger]);
 
@@ -80,12 +79,12 @@ function AppContent() {
               Dashboard
             </button>
             <button
-              className={`nav-tab${activeTab === 'pipeline' ? ' active' : ''}`}
-              onClick={() => setActiveTab('pipeline')}
+              className={`nav-tab${activeTab === 'applications' ? ' active' : ''}`}
+              onClick={() => setActiveTab('applications')}
             >
-              Pipeline
-              {pipelineCount > 0 && (
-                <span className="nav-tab-badge">{pipelineCount}</span>
+              Applications
+              {applicationsCount > 0 && (
+                <span className="nav-tab-badge">{applicationsCount}</span>
               )}
             </button>
           </div>
@@ -110,7 +109,7 @@ function AppContent() {
       <main className="main-content">
         {activeTab === 'dashboard'
           ? <Dashboard refreshTrigger={refreshTrigger} />
-          : <PipelineView refreshTrigger={refreshTrigger} />
+          : <ApplicationsView refreshTrigger={refreshTrigger} />
         }
       </main>
 

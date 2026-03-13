@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { getAllJobs, updateJobStage, updateJobFields } from '../services/jobService';
+import { getAllJobs, updateJobStage, updateJobFields, removeFromApplications } from '../services/jobService';
 import type { Job, ApplicationStage } from '../types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STAGES: ApplicationStage[] = [
-  'saved', 'applied', 'phone_screen', 'interview', 'offer', 'rejected',
+  'applied', 'phone_screen', 'interview', 'offer', 'rejected',
 ];
 
 const STAGE_LABELS: Record<ApplicationStage, string> = {
@@ -28,6 +28,8 @@ const STAGE_COLOR_CLASS: Record<ApplicationStage, string> = {
 
 type SortField = 'title' | 'company' | 'stage' | 'dateReceived' | 'followUpDate';
 type SortDir = 'asc' | 'desc';
+
+const PAGE_SIZE = 25;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,10 +108,20 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
   const [sortField, setSortField] = useState<SortField>('dateReceived');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
+  // ── Pagination ──
+  const [currentPage, setCurrentPage] = useState(1);
+
   // ── Inline editing ──
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editValue, setEditValue] = useState('');
   const [cellErrors, setCellErrors] = useState<Record<string, string>>({});
+
+  // ── Pending stage change (awaiting date confirmation) ──
+  const [pendingStage, setPendingStage] = useState<{
+    rowId: string;
+    newStage: ApplicationStage;
+    date: string;
+  } | null>(null);
 
   // Effective hideRejected = activeOnly || hideRejected
   const effectiveHideRejected = activeOnly || hideRejected;
@@ -165,6 +177,9 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
   const sortIndicator = (field: SortField) =>
     sortField === field ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕';
 
+  // Reset to page 1 whenever filters or sort change
+  useEffect(() => { setCurrentPage(1); }, [search, stageFilter, dateRange, hideRejected, activeOnly, sortField, sortDir]);
+
   const clearFilters = () => {
     setSearch('');
     setStageFilter('all');
@@ -184,6 +199,23 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     setEditValue('');
   };
 
+  const confirmStageChange = async () => {
+    if (!pendingStage) return;
+    const { rowId, newStage, date } = pendingStage;
+    const job = jobs.find(j => j.id === rowId);
+    const oldStage = job ? getEffectiveStage(job) : null;
+    const oldStageDate = job?.stageDate;
+    setPendingStage(null);
+    onJobUpdate(rowId, { applicationStage: newStage, stageDate: date });
+    try {
+      await updateJobStage(rowId, newStage, date);
+      setCellErrors(prev => { const next = { ...prev }; delete next[`${rowId}-stage`]; return next; });
+    } catch {
+      onJobUpdate(rowId, { applicationStage: oldStage ?? undefined, stageDate: oldStageDate });
+      setCellErrors(prev => ({ ...prev, [`${rowId}-stage`]: 'Failed to update stage' }));
+    }
+  };
+
   // commitEdit handles notes and followUpDate only.
   // Stage changes go directly through the select onChange handler (see below)
   // to avoid the React async state issue where editValue would be stale.
@@ -191,6 +223,9 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     if (!editingCell) return;
     const { rowId, field } = editingCell;
     if (field === 'stage') return; // handled in select onChange
+    // Skip save if value hasn't changed
+    const currentValue = field === 'notes' ? (job.notes ?? '') : (job.followUpDate ?? '');
+    if (editValue === currentValue) { cancelEdit(); return; }
     // Capture pre-optimistic values BEFORE calling onJobUpdate so revert is always correct
     const revertNotes = job.notes;
     const revertFollowUpDate = job.followUpDate;
@@ -210,8 +245,17 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     }
   };
 
-  const formatDate = (iso: string) =>
-    iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
+  const formatDate = (iso: string) => {
+    if (!iso) return '—';
+    // Date-only strings (YYYY-MM-DD) parse as UTC midnight — use local constructor to avoid day-off bug
+    const d = iso.includes('T')
+      ? new Date(iso)
+      : (() => { const [y, m, day] = iso.split('-').map(Number); return new Date(y, m - 1, day); })();
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   if (sorted.length === 0) {
     return (
@@ -292,7 +336,7 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map(job => {
+            {paginated.map(job => {
               const stage = getEffectiveStage(job);
               const isEditingStage = editingCell?.rowId === job.id && editingCell.field === 'stage';
               const isEditingNotes = editingCell?.rowId === job.id && editingCell.field === 'notes';
@@ -325,39 +369,66 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
 
                   {/* Stage — inline editable */}
                   <td className="pt-stage">
-                    {isEditingStage ? (
+                    {pendingStage?.rowId === job.id ? (
+                      <div className="pt-stage-popover">
+                        <div className="pt-stage-popover-label">{STAGE_LABELS[pendingStage.newStage]}</div>
+                        <input
+                          type="date"
+                          className="pt-date-input"
+                          value={pendingStage.date}
+                          onChange={e => setPendingStage(prev => prev ? { ...prev, date: e.target.value } : null)}
+                          autoFocus
+                        />
+                        <div className="pt-stage-popover-actions">
+                          <button className="pt-stage-popover-confirm" onClick={confirmStageChange}>Confirm</button>
+                          <button className="pt-stage-popover-cancel" onClick={() => setPendingStage(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : isEditingStage ? (
                       <select
                         className="pt-stage-select"
                         value={editValue}
                         autoFocus
                         onChange={async e => {
-                          // Do NOT use commitEdit here — editValue state is stale inside onChange.
-                          // Call updateJobStage directly with e.target.value.
-                          const newStage = e.target.value as ApplicationStage;
-                          const oldStage = getEffectiveStage(job);
+                          const val = e.target.value;
                           setEditingCell(null);
-                          onJobUpdate(job.id, { applicationStage: newStage });
-                          try {
-                            await updateJobStage(job.id, newStage);
-                            setCellErrors(prev => { const next = { ...prev }; delete next[`${job.id}-stage`]; return next; });
-                          } catch {
-                            onJobUpdate(job.id, { applicationStage: oldStage ?? undefined });
-                            setCellErrors(prev => ({ ...prev, [`${job.id}-stage`]: 'Failed to update stage' }));
+                          if (val === '__remove__') {
+                            const oldStage = getEffectiveStage(job);
+                            const oldStageDate = job.stageDate;
+                            onJobUpdate(job.id, { applied: false, applicationStage: undefined, stageDate: undefined });
+                            try {
+                              await removeFromApplications(job.id);
+                            } catch {
+                              onJobUpdate(job.id, { applicationStage: oldStage ?? undefined, stageDate: oldStageDate, applied: job.applied });
+                              setCellErrors(prev => ({ ...prev, [`${job.id}-stage`]: 'Failed to remove' }));
+                            }
+                            return;
                           }
+                          setPendingStage({
+                            rowId: job.id,
+                            newStage: val as ApplicationStage,
+                            date: new Date().toISOString().slice(0, 10),
+                          });
                         }}
                         onBlur={cancelEdit}
                       >
                         {STAGES.map(s => (
                           <option key={s} value={s}>{STAGE_LABELS[s]}</option>
                         ))}
+                        <option disabled>──────────</option>
+                        <option value="__remove__">Remove from board</option>
                       </select>
                     ) : (
                       <button
                         className={`pt-stage-badge ${stage ? STAGE_COLOR_CLASS[stage] : ''}`}
-                        onClick={() => startEdit(job.id, 'stage', stage ?? 'saved')}
+                        onClick={() => startEdit(job.id, 'stage', stage ?? 'applied')}
                         title="Click to change stage"
                       >
-                        {stage ? STAGE_LABELS[stage] : '—'} ▾
+                        <span>
+                          {stage ? STAGE_LABELS[stage] : '—'}
+                          {job.stageDate && <span className="pt-stage-date-inline"> · {formatDate(job.stageDate)}</span>}
+                        </span>
+                        <span>▾</span>
                       </button>
                     )}
                     {cellErrors[`${job.id}-stage`] && (
@@ -431,7 +502,33 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
       </div>
 
       <div className="pipeline-table-footer">
-        Showing {sorted.length} of {jobs.length} pipeline applications
+        <span>Showing {Math.min(currentPage * PAGE_SIZE, sorted.length)} of {sorted.length} applications</span>
+        {totalPages > 1 && (
+          <div className="pagination">
+            <button className="page-nav" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+              Previous
+            </button>
+            <div className="page-numbers">
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+                .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                  if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('...');
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, i) =>
+                  p === '...'
+                    ? <span key={`dot-${i}`} className="page-dots">...</span>
+                    : <button key={p} className={`page-num ${p === currentPage ? 'active' : ''}`} onClick={() => setCurrentPage(p as number)}>{p}</button>
+                )}
+            </div>
+            <button className="page-nav" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages}>
+              Next
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -443,14 +540,17 @@ interface PipelineViewProps {
   refreshTrigger: number;
 }
 
-export function PipelineView({ refreshTrigger }: PipelineViewProps) {
+export function ApplicationsView({ refreshTrigger }: PipelineViewProps) {
   const [allJobs, setAllJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
     const all = await getAllJobs();
-    setAllJobs(all.filter(j => getEffectiveStage(j) !== null));
+    setAllJobs(all.filter(j => {
+      const s = getEffectiveStage(j);
+      return s !== null && s !== 'saved';
+    }));
     setLoading(false);
   }, []);
 
@@ -470,9 +570,9 @@ export function PipelineView({ refreshTrigger }: PipelineViewProps) {
   if (allJobs.length === 0) {
     return (
       <div className="pipeline-view">
-        <h2>Pipeline</h2>
+        <h2>Applications</h2>
         <p className="pipeline-empty">
-          No jobs in your pipeline yet — save or apply to a job to get started.
+          No applications yet — apply to a job to start tracking it here.
         </p>
       </div>
     );

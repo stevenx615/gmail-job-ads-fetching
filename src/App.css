@@ -867,6 +867,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .pipeline-stats-bar {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
   padding: 16px;
   border-bottom: 1px solid var(--card-border);
@@ -968,6 +969,19 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
   cursor: not-allowed;
 }
 
+/* Override legacy pipeline-view for table layout */
+.pipeline-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
 /* Table */
 .pipeline-table-wrapper {
   display: flex;
@@ -978,7 +992,9 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 
 .pipeline-table-scroll {
   overflow-x: auto;
+  overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .pipeline-table {
@@ -1023,7 +1039,8 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 }
 
 .pipeline-table td {
-  padding: 8px 12px;
+  padding: 0 12px;
+  height: 44px;
   vertical-align: middle;
 }
 
@@ -1037,6 +1054,9 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 
 /* Company / Location */
 .pt-company, .pt-location { color: var(--text-mid); }
+
+/* Stage cell — fixed width so badge↔select swap doesn't shift columns */
+.pt-stage { width: 170px; min-width: 170px; max-width: 170px; position: relative; }
 
 /* Source badge */
 .source-badge {
@@ -1063,9 +1083,61 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
   color: var(--text-mid);
 }
 
+/* Stage date inline in badge */
+.pt-stage-date-inline {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+/* Stage change popover */
+.pt-stage-popover {
+  position: absolute;
+  z-index: 20;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+}
+.pt-stage-popover-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+.pt-stage-popover-actions {
+  display: flex;
+  gap: 6px;
+}
+.pt-stage-popover-confirm {
+  flex: 1;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pt-stage-popover-cancel {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  background: var(--input-bg);
+  color: var(--text-mid);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pt-stage-popover-cancel:hover { background: var(--hover-bg); }
+
 /* Stage badge / select */
 .pt-stage-badge {
-  padding: 3px 8px;
+  padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
@@ -1073,6 +1145,12 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
   border: 1px solid transparent;
   background: transparent;
   transition: opacity 0.1s;
+  height: 24px;
+  width: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .pt-stage-badge:hover { opacity: 0.8; }
 
@@ -1084,12 +1162,15 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .stage-dot-rejected.pt-stage-badge  { color: var(--stage-rejected-color); border-color: var(--stage-rejected-color); background: var(--stage-rejected-bg); }
 
 .pt-stage-select {
-  padding: 3px 6px;
+  padding: 2px 6px;
   border: 1px solid var(--accent);
   border-radius: 4px;
   background: var(--input-bg);
   color: var(--text-dark);
-  font-size: 12px;
+  font-size: 11px;
+  height: 24px;
+  width: 100%;
+  box-sizing: border-box;
   cursor: pointer;
 }
 
@@ -1109,7 +1190,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 }
 
 /* Notes */
-.pt-notes { max-width: 220px; }
+.pt-notes { width: 220px; min-width: 220px; max-width: 220px; }
 
 .pt-notes-value {
   cursor: pointer;
@@ -1162,9 +1243,17 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 
 /* Footer */
 .pipeline-table-footer {
-  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 16px;
   font-size: 12px;
   color: var(--text-light);
   border-top: 1px solid var(--card-border);
   background: var(--hover-bg);
+  flex-shrink: 0;
+}
+.pipeline-table-footer .pagination {
+  padding: 4px 0;
 }

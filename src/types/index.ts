@@ -30,6 +30,7 @@ export interface Job {
   description?: string;
   badges?: JobBadges;
   applicationStage?: ApplicationStage;
+  stageDate?: string;
   followUpDate?: string;
   notes?: string;
   createdAt?: unknown;
