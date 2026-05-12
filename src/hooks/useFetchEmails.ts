@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
-import { listMessageIds, getMessages, getMessageDate, archiveMessages } from '../services/gmailService';
-import { parseEmail } from '../parsers/parserRegistry';
+import { listMessageIds, getMessages, getMessageDate, archiveMessages, getSenderEmail } from '../services/gmailService';
+import { parseEmail, getParserForSender } from '../parsers/parserRegistry';
 import { addJobIfNotExists, DedupCache, getAllJobs, invalidateJobsCache } from '../services/jobService';
 import { buildEmailQuery } from '../config/gmail';
 import type { EmailQueryOptions } from '../config/gmail';
 import type { FetchProgress, NewJob } from '../types';
+import { getSettings } from '../services/settingsService';
 
 export interface FetchEmailsOptions extends EmailQueryOptions {
   shouldArchive: boolean;
@@ -92,6 +93,25 @@ export function useFetchEmails() {
         newJobsCount: 0,
       });
 
+      // Log email count per platform
+      const emailsByParser: Record<string, number> = {};
+      for (const msg of messages) {
+        const sender = getSenderEmail(msg);
+        const parserName = getParserForSender(sender).name;
+        emailsByParser[parserName] = (emailsByParser[parserName] ?? 0) + 1;
+      }
+      console.log(
+        `[FetchEmails] Emails found by platform (${messages.length} total):`,
+        Object.entries(emailsByParser)
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, n]) => `${name}: ${n}`)
+          .join(', ')
+      );
+
+      const blocklist = (getSettings().companyBlocklist ?? [])
+        .map(c => c.trim().toLowerCase())
+        .filter(Boolean);
+
       const allJobs: NewJob[] = [];
 
       for (let i = 0; i < messages.length; i++) {
@@ -101,6 +121,7 @@ export function useFetchEmails() {
         const dateReceived = getMessageDate(message);
 
         for (const pj of parsedJobs) {
+          if (blocklist.length > 0 && blocklist.includes(pj.company.trim().toLowerCase())) continue;
           allJobs.push({
             ...pj,
             emailId: message.id,
@@ -114,6 +135,19 @@ export function useFetchEmails() {
           message: `Parsed ${i + 1}/${messages.length} emails (${allJobs.length} jobs found)`,
         }));
       }
+
+      // Log per-source breakdown
+      const bySource: Record<string, number> = {};
+      for (const job of allJobs) {
+        bySource[job.source] = (bySource[job.source] ?? 0) + 1;
+      }
+      console.log(
+        `[FetchEmails] Jobs parsed by source (${allJobs.length} total):`,
+        Object.entries(bySource)
+          .sort((a, b) => b[1] - a[1])
+          .map(([src, n]) => `${src}: ${n}`)
+          .join(', ') || 'none'
+      );
 
       // Phase 4: Save to Firestore (dedup by URL + title/company)
       setProgress({

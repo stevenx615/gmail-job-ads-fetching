@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import type { BadgeSuggestions, AIJobContext } from '../types/ai';
+import type { BadgeSuggestions, AIJobContext, TailorAnalysis, AnalyzeTailorResult } from '../types/ai';
 import type { AppSettings } from '../types/settings';
 import { getBadgeCategoriesForJobType } from '../constants/badgeDefinitions';
 
@@ -450,6 +450,164 @@ ${JSON.stringify(contentSections.map(s => ({ i: s.index, text: s.text })))}`;
       return { replacements: null, error: 'Invalid API key. Check your key in Settings.' };
     }
     return { replacements: null, error: `AI request failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
+  }
+}
+
+function buildAnalyzePrompt(resumeText: string, jobDescription: string, jobTitle: string, company: string): string {
+  return `You are a professional resume advisor. Analyze the resume against the job description and return a structured JSON analysis.
+
+RULES:
+- Only list skills, experiences, and qualifications ACTUALLY present in the resume
+- Mark isSuggestion: true only for items the candidate does NOT have but should consider (coaching hints)
+- For job requirements not found in resume: set match to null and include to false
+- NEVER fabricate work history, skills, education, or experience
+- include: true = recommended to include in the final resume; false = optional or gap
+
+Return ONLY valid JSON (no markdown, no code fences, no explanation):
+{
+  "candidateName": "Full name from resume header",
+  "summary": "3-4 sentence professional summary written specifically for this role",
+  "atsScore": 85,
+  "matchedKeywords": ["keyword1", "keyword2"],
+  "missingKeywords": ["missing1", "missing2"],
+  "tips": ["Tip to improve match", "Another tip"],
+  "qualifications": [
+    {
+      "requirement": "specific requirement from job posting",
+      "match": "relevant text from resume or null if absent",
+      "isSuggestion": false,
+      "note": "optional coaching note",
+      "suggestions": ["stronger alternative phrasing or suggested addition if not found"],
+      "include": true
+    }
+  ],
+  "experience": [
+    { "company": "Company Name", "title": "Job Title", "period": "Date Range", "bullets": [
+      {
+        "text": "EXACT original bullet text from the resume",
+        "tailored": "improved version with job-relevant keywords and stronger phrasing",
+        "keywords": ["matched", "keywords"],
+        "matchLevel": "full",
+        "isSuggestion": false,
+        "include": true
+      }
+    ]}
+  ],
+  "skills": [
+    { "name": "Skill", "fromResume": true, "isSuggestion": false, "note": "", "include": true }
+  ],
+  "education": ["Degree · Institution · Year"],
+  "other": [
+    { "title": "Section Name", "items": [{ "text": "item text", "include": true }] }
+  ]
+}
+
+Job: ${jobTitle} at ${company}
+
+Job Description:
+${jobDescription}
+
+Resume:
+${resumeText}`;
+}
+
+export async function analyzeTailorSections(
+  resumeText: string,
+  jobDescription: string,
+  jobTitle: string,
+  company: string,
+  settings: AppSettings,
+): Promise<AnalyzeTailorResult> {
+  const { aiProvider, aiApiKey, aiModel } = settings;
+
+  if (aiProvider === 'none' || !aiApiKey) {
+    return { analysis: null, error: 'No AI provider configured. Set one up in Settings.' };
+  }
+
+  const model = aiModel || getDefaultModel(aiProvider);
+  const prompt = buildAnalyzePrompt(resumeText, jobDescription, jobTitle, company);
+
+  try {
+    const responseText = await callBackendAI(prompt, aiApiKey, model, aiProvider, 8192);
+
+    let cleaned = responseText.trim();
+    const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) cleaned = fenceMatch[1].trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { analysis: null, error: 'Could not parse AI response as JSON' };
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    const analysis: TailorAnalysis = {
+      candidateName: String(parsed.candidateName || ''),
+      summary: String(parsed.summary || ''),
+      atsScore: typeof parsed.atsScore === 'number' ? Math.max(0, Math.min(100, parsed.atsScore)) : 0,
+      matchedKeywords: Array.isArray(parsed.matchedKeywords) ? parsed.matchedKeywords.map(String) : [],
+      missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords.map(String) : [],
+      tips: Array.isArray(parsed.tips) ? parsed.tips.map(String) : [],
+      qualifications: Array.isArray(parsed.qualifications)
+        ? parsed.qualifications.map((q: Record<string, unknown>) => ({
+            requirement: String(q.requirement || ''),
+            match: q.match ? String(q.match) : null,
+            isSuggestion: !!q.isSuggestion,
+            note: q.note ? String(q.note) : undefined,
+            suggestions: Array.isArray(q.suggestions) ? q.suggestions.map(String).filter(Boolean) : [],
+            include: q.include !== false,
+          }))
+        : [],
+      experience: Array.isArray(parsed.experience)
+        ? parsed.experience.map((e: Record<string, unknown>) => ({
+            company: String(e.company || ''),
+            title: String(e.title || ''),
+            period: String(e.period || ''),
+            bullets: Array.isArray(e.bullets)
+              ? e.bullets.map((b: Record<string, unknown>) => ({
+                  text: String(b.text || ''),
+                  tailored: String(b.tailored || b.text || ''),
+                  keywords: Array.isArray(b.keywords) ? b.keywords.map(String) : [],
+                  matchLevel: (['full', 'partial', 'none'].includes(b.matchLevel as string) ? b.matchLevel : 'partial') as 'full' | 'partial' | 'none',
+                  isSuggestion: !!b.isSuggestion,
+                  include: b.include !== false,
+                }))
+              : [],
+          }))
+        : [],
+      skills: Array.isArray(parsed.skills)
+        ? parsed.skills.map((s: Record<string, unknown>) => ({
+            name: String(s.name || ''),
+            fromResume: !!s.fromResume,
+            isSuggestion: !!s.isSuggestion,
+            note: s.note ? String(s.note) : undefined,
+            include: s.include !== false,
+          }))
+        : [],
+      education: Array.isArray(parsed.education) ? parsed.education.map(String) : [],
+      other: Array.isArray(parsed.other)
+        ? parsed.other.map((o: Record<string, unknown>) => ({
+            title: String(o.title || ''),
+            items: Array.isArray(o.items)
+              ? o.items.map((item: Record<string, unknown>) => ({
+                  text: String(item.text || ''),
+                  include: item.include !== false,
+                }))
+              : [],
+          }))
+        : [],
+    };
+
+    return { analysis, error: null };
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      const delay = parseRetryDelay(err);
+      return { analysis: null, error: `API quota exceeded.${delay ? ` Retry in ${delay}.` : ' Please wait and try again.'}` };
+    }
+    if (isCorsError(err)) {
+      return { analysis: null, error: 'Backend not available. Start the local backend to use resume tailoring.' };
+    }
+    if (err instanceof Error && err.message === 'Invalid API key') {
+      return { analysis: null, error: 'Invalid API key. Check your key in Settings.' };
+    }
+    return { analysis: null, error: `AI request failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
   }
 }
 

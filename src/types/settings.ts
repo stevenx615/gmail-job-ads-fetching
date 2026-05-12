@@ -12,7 +12,11 @@ export interface AppSettings {
   customSenders: string[];
   defaultAutoArchive: boolean;
 
+  // Search Settings
+  popularKeywords: string[];
+
   // Job Management
+  companyBlocklist: string[];
   autoMarkReadAfterDays: number; // 0 = never
   autoDeleteAfterDays: number; // 0 = never
   resumeText: string;
@@ -54,6 +58,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoFetchDescriptions: false,
   customSenders: [],
   defaultAutoArchive: false,
+  popularKeywords: ['junior', 'entry level', 'intern', 'remote', 'developer', 'it support', 'winnipeg'],
+  companyBlocklist: [],
   autoMarkReadAfterDays: 0,
   autoDeleteAfterDays: 0,
   resumeText: '',

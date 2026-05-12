@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, resetSettings } from '../services/settingsService';
 import { deleteAllJobs, deleteReadJobs, markAllJobsRead, exportJobs, getAllJobs, updateJobBadges } from '../services/jobService';
 import { testAIConnection, getDefaultModel, clearSuggestionCache } from '../services/aiService';
@@ -37,7 +37,59 @@ interface SettingsProps {
   onSettingsSaved: () => void;
 }
 
-type SettingsTab = 'display' | 'jobs' | 'badges' | 'ai';
+type SettingsTab = 'display' | 'search' | 'jobs' | 'badges' | 'ai';
+
+function TagListEditor({
+  value,
+  onChange,
+  placeholder = 'Add item…',
+}: {
+  value: string[];
+  onChange: (list: string[]) => void;
+  placeholder?: string;
+}) {
+  const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const add = () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    if (value.map(v => v.toLowerCase()).includes(trimmed.toLowerCase())) { setInput(''); return; }
+    onChange([...value, trimmed]);
+    setInput('');
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div className="blocklist-editor">
+      <div className="blocklist-input-row">
+        <input
+          ref={inputRef}
+          className="settings-input"
+          placeholder={placeholder}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+        />
+        <button className="settings-btn" onClick={add}>Add</button>
+      </div>
+      {value.length > 0 && (
+        <div className="blocklist-tags">
+          {value.map(item => (
+            <span key={item} className="blocklist-tag">
+              {item}
+              <button
+                className="blocklist-tag-remove"
+                onClick={() => onChange(value.filter(v => v !== item))}
+                title="Remove"
+              >×</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -169,6 +221,7 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
               {([
                 ['ai', 'AI'],
                 ['display', 'Display'],
+                ['search', 'Search'],
                 ['jobs', 'Job Management'],
                 ['badges', 'Badges'],
               ] as [SettingsTab, string][]).map(([key, label]) => (
@@ -241,6 +294,34 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
                 <option value="title-desc">Title Z-A</option>
                 <option value="company-asc">Company A-Z</option>
               </select>
+            </div>
+          </section>
+          )}
+
+          {activeTab === 'search' && (
+          <section className="settings-section">
+            <h3 className="settings-section-title">Search</h3>
+
+            <div className="settings-field">
+              <label className="settings-label">Popular Keywords</label>
+              <span className="settings-hint">
+                These keywords appear as quick-filter buttons below the search bar on the Dashboard.
+                Click any tag to instantly filter jobs by that term.
+              </span>
+              <TagListEditor
+                value={settings.popularKeywords ?? []}
+                onChange={list => handleChange('popularKeywords', list)}
+                placeholder="Add keyword…"
+              />
+              {(settings.popularKeywords ?? []).length === 0 && (
+                <button
+                  className="settings-btn"
+                  style={{ marginTop: 8, alignSelf: 'flex-start' }}
+                  onClick={() => handleChange('popularKeywords', DEFAULT_SETTINGS.popularKeywords)}
+                >
+                  Restore defaults
+                </button>
+              )}
             </div>
           </section>
           )}
@@ -360,6 +441,16 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
                   {bulkActionStatus}
                 </span>
               )}
+            </div>
+
+            <div className="settings-field">
+              <label className="settings-label">Company Blocklist</label>
+              <span className="settings-hint">Companies on this list will be skipped when fetching emails.</span>
+              <TagListEditor
+                value={settings.companyBlocklist ?? []}
+                onChange={list => handleChange('companyBlocklist', list)}
+                placeholder="Company name…"
+              />
             </div>
           </section>
           )}

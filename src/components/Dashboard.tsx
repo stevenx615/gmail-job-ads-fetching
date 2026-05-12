@@ -5,10 +5,8 @@ import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
 import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
 import type { Job, JobBadges } from '../types';
-import { tailorResume, tailorResumeDocx } from '../services/aiService';
-import type { TailorResumeResult, DocxSection, DocxReplacement } from '../services/aiService';
+import { ResumeTailorWorkshop } from './ResumeTailorWorkshop';
 
-const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || '8000';
 
 interface DashboardProps {
   refreshTrigger: number;
@@ -39,22 +37,14 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const [resumeText, setResumeText] = useState(() => localStorage.getItem('resumeText') || '');
   const [resumeModalOpen, setResumeModalOpen] = useState(false);
   const [tailorModalJob, setTailorModalJob] = useState<Job | null>(null);
-  const [tailoredResume, setTailoredResume] = useState<string | null>(null);
-  const [isTailoring, setIsTailoring] = useState(false);
-  const [tailorError, setTailorError] = useState<string | null>(null);
-  const [tailorCopied, setTailorCopied] = useState(false);
   const [resumeDocxFile, setResumeDocxFile] = useState<File | null>(null);
   const [docxPreviewHtml, setDocxPreviewHtml] = useState(() => localStorage.getItem('docxPreviewHtml') || '');
   const [resumeInputTab, setResumeInputTab] = useState<'upload' | 'paste'>(
     () => (localStorage.getItem('resumeMode') as 'upload' | 'paste') || 'upload'
   );
-  const [tailorStep, setTailorStep] = useState<'idle' | 'extracting' | 'tailoring' | 'rebuilding' | 'done'>('idle');
-  const [docxBlobUrl, setDocxBlobUrl] = useState<string | null>(null);
   const jobListRef = useRef<HTMLDivElement>(null);
   const resumeEditorRef = useRef<HTMLDivElement>(null);
   const docxInputRef = useRef<HTMLInputElement>(null);
-  const tailorCacheRef = useRef<Map<string, string>>(new Map());
-  const docxCacheRef = useRef<Map<string, string>>(new Map());
   const pageSize = settings.jobsPerPage;
 
   const loadJobs = useCallback(async () => {
@@ -336,18 +326,6 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     }
   };
 
-  const runTailorResume = async (job: Job) => {
-    setTailoredResume(null);
-    setTailorError(null);
-    setTailorCopied(false);
-    setIsTailoring(true);
-    const result: TailorResumeResult = await tailorResume(resumeText, job.description!, job.title, job.company, settings);
-    if (result.tailoredResume) tailorCacheRef.current.set(job.id, result.tailoredResume);
-    setTailoredResume(result.tailoredResume);
-    setTailorError(result.error);
-    setIsTailoring(false);
-  };
-
   const handleDocxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -363,163 +341,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     } catch {
       console.warn('Could not persist DOCX to localStorage (file may be too large)');
     }
-    tailorCacheRef.current.clear();
-    docxCacheRef.current.clear();
     setResumeDocxFile(file);
   };
 
-  const runTailorDocx = async (job: Job) => {
-    if (!resumeDocxFile) return;
-    setTailorError(null);
-    setTailoredResume(null);
-    setDocxBlobUrl(null);
-    setTailorStep('extracting');
+  const handleTailorResume = (job: Job) => setTailorModalJob(job);
 
-    // Step 1: extract sections from backend
-    let sections: DocxSection[];
-    try {
-      const formData = new FormData();
-      formData.append('file', resumeDocxFile);
-      const res = await fetch('/api/extract-sections', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error(`Backend error: ${res.status}`);
-      const data = await res.json();
-      sections = data.sections as DocxSection[];
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      setTailorError(
-        msg.includes('Failed to fetch') || msg.includes('NetworkError')
-          ? `Backend not available. Start the Python backend: cd backend && uvicorn main:app --reload --port ${BACKEND_PORT}`
-          : `Failed to extract sections: ${msg}`
-      );
-      setTailorStep('idle');
-      setIsTailoring(false);
-      return;
-    }
-
-    // Step 2: tailor content sections with AI
-    setTailorStep('tailoring');
-    const contentSections = sections.filter(s => s.type === 'content');
-    const { replacements, error: aiError } = await tailorResumeDocx(
-      contentSections,
-      job.description!,
-      job.title,
-      job.company,
-      settings,
-    );
-    if (aiError || !replacements) {
-      setTailorError(aiError || 'AI returned no replacements');
-      setTailorStep('idle');
-      setIsTailoring(false);
-      return;
-    }
-
-    // Step 3: rebuild docx on backend
-    setTailorStep('rebuilding');
-    try {
-      const formData = new FormData();
-      formData.append('file', resumeDocxFile);
-      formData.append('replacements', JSON.stringify(replacements.map((r: DocxReplacement) => ({ index: r.index, new_text: r.new_text }))));
-      const res = await fetch('/api/rebuild-docx', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error(`Backend error: ${res.status}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      setDocxBlobUrl(url);
-      docxCacheRef.current.set(job.id, url);
-
-      // Auto-download
-      const title = job.title.replace(/[^a-z0-9]/gi, '_');
-      const company = job.company.replace(/[^a-z0-9]/gi, '_');
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Resume_${title}_${company}.docx`;
-      a.click();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      setTailorError(`Failed to rebuild document: ${msg}`);
-      setTailorStep('idle');
-      setIsTailoring(false);
-      return;
-    }
-
-    setTailorStep('done');
-    setIsTailoring(false);
-  };
-
-  const startTailor = (job: Job, source: 'upload' | 'paste') => {
-    setTailoredResume(null);
-    setTailorError(null);
-    setTailorStep('idle');
-    setDocxBlobUrl(null);
-    setTailorCopied(false);
-
-    if (source === 'upload' && resumeDocxFile) {
-      const cachedUrl = docxCacheRef.current.get(job.id);
-      if (cachedUrl) {
-        setDocxBlobUrl(cachedUrl);
-        setTailorStep('done');
-        setIsTailoring(false);
-        return;
-      }
-      setIsTailoring(true);
-      runTailorDocx(job);
-      return;
-    }
-
-    // Paste flow
-    const cached = tailorCacheRef.current.get(job.id);
-    if (cached) {
-      setTailoredResume(cached);
-      setIsTailoring(false);
-      return;
-    }
-    runTailorResume(job);
-  };
-
-  const handleTailorResume = (job: Job) => {
-    setTailorModalJob(job);
-    startTailor(job, resumeInputTab);
-  };
-
-  const closeTailorModal = () => {
-    setTailorModalJob(null);
-    setTailoredResume(null);
-    setTailorError(null);
-    setIsTailoring(false);
-    setTailorCopied(false);
-    setTailorStep('idle');
-    setDocxBlobUrl(null);
-  };
-
-  const handleDownloadResume = () => {
-    if (!tailoredResume || !tailorModalJob) return;
-    const title = tailorModalJob.title.replace(/[^a-z0-9]/gi, '_');
-    const company = tailorModalJob.company.replace(/[^a-z0-9]/gi, '_');
-    const htmlDoc = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Resume – ${tailorModalJob.title} at ${tailorModalJob.company}</title>
-<style>
-  body { font-family: Arial, sans-serif; font-size: 11pt; color: #1e293b; max-width: 800px; margin: 2rem auto; padding: 0 2rem; line-height: 1.6; }
-  h1, h2 { font-size: 11pt; font-weight: 700; margin-top: 1.2em; margin-bottom: 0.3em; }
-  h3 { font-size: 11pt; font-weight: 600; margin-top: 1em; margin-bottom: 0.2em; }
-  p { margin: 0.3em 0; }
-  ul { margin: 0.3em 0 0.3em 1.5em; }
-  li { margin: 0.15em 0; }
-</style>
-</head>
-<body>
-${tailoredResume}
-</body>
-</html>`;
-    const blob = new Blob([htmlDoc], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Resume_${title}_${company}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const closeTailorModal = () => setTailorModalJob(null);
 
   const getBadgeCategoryClass = (key: string) => {
     switch (key) {
@@ -648,18 +475,20 @@ ${tailoredResume}
           )}
           <button className="hero-search-btn" onClick={() => {}}>Search Jobs</button>
         </div>
-        <div className="hero-tags">
-          <span className="hero-tags-label">Popular:</span>
-          {['junior', 'entry level', 'intern', 'remote', 'developer', 'it support', 'winnipeg'].map(tag => (
-            <button
-              key={tag}
-              className={`hero-tag ${searchTerm.toLowerCase() === tag ? 'active' : ''}`}
-              onClick={() => setSearchTerm(prev => prev.toLowerCase() === tag ? '' : tag)}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
+        {(settings.popularKeywords ?? []).length > 0 && (
+          <div className="hero-tags">
+            <span className="hero-tags-label">Popular:</span>
+            {(settings.popularKeywords ?? []).map(tag => (
+              <button
+                key={tag}
+                className={`hero-tag ${searchTerm.toLowerCase() === tag.toLowerCase() ? 'active' : ''}`}
+                onClick={() => setSearchTerm(prev => prev.toLowerCase() === tag.toLowerCase() ? '' : tag)}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="content-area">
@@ -1191,124 +1020,14 @@ ${tailoredResume}
       )}
 
       {tailorModalJob && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) closeTailorModal(); }}>
-          <div className="modal-card tailor-resume-modal">
-            <div className="modal-header">
-              <div>
-                <div className="modal-title">Tailor Resume</div>
-                <div className="tailor-resume-subtitle">{tailorModalJob.title} at {tailorModalJob.company}</div>
-              </div>
-              <button className="modal-close" onClick={closeTailorModal} disabled={isTailoring}>&times;</button>
-            </div>
-            <div className="modal-body tailor-resume-body">
-              {resumeInputTab === 'upload' ? (
-                tailorError ? (
-                  <div className="tailor-resume-error">{tailorError}</div>
-                ) : tailorStep === 'done' ? (
-                  <div className="tailor-done-msg">
-                    <span className="tailor-done-icon">✓</span>
-                    Ready — your tailored resume has been downloaded.
-                  </div>
-                ) : (
-                  <ul className="tailor-step-list">
-                    {([
-                      { key: 'extracting', label: 'Analyzing resume structure…' },
-                      { key: 'tailoring',  label: 'Tailoring content with AI…' },
-                      { key: 'rebuilding', label: 'Rebuilding document…' },
-                    ] as { key: typeof tailorStep; label: string }[]).map(step => {
-                      const steps = ['extracting', 'tailoring', 'rebuilding'] as const;
-                      const currentIdx = steps.indexOf(tailorStep as typeof steps[number]);
-                      const stepIdx = steps.indexOf(step.key as typeof steps[number]);
-                      const state = stepIdx < currentIdx ? 'done' : stepIdx === currentIdx ? 'active' : 'pending';
-                      return (
-                        <li key={step.key} className={`tailor-step-item ${state}`}>
-                          {state === 'done' && <span className="step-icon">✓</span>}
-                          {state === 'active' && <span className="badge-selector-ai-spinner step-spinner" />}
-                          {state === 'pending' && <span className="step-icon step-icon-pending">○</span>}
-                          {step.label}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )
-              ) : (
-                isTailoring ? (
-                  <div className="tailor-resume-loading">
-                    <span className="badge-selector-ai-spinner" />
-                    Tailoring your resume...
-                  </div>
-                ) : tailorError ? (
-                  <div className="tailor-resume-error">{tailorError}</div>
-                ) : tailoredResume ? (
-                  <div
-                    className="tailor-resume-output"
-                    dangerouslySetInnerHTML={{ __html: tailoredResume }}
-                  />
-                ) : null
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="nav-btn nav-btn-outline" onClick={closeTailorModal}>Close</button>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {/* DOCX flow buttons */}
-                {resumeInputTab === 'upload' && tailorStep === 'done' && docxBlobUrl && (
-                  <button
-                    className="nav-btn nav-btn-outline"
-                    onClick={() => {
-                      const title = tailorModalJob!.title.replace(/[^a-z0-9]/gi, '_');
-                      const company = tailorModalJob!.company.replace(/[^a-z0-9]/gi, '_');
-                      const a = document.createElement('a');
-                      a.href = docxBlobUrl;
-                      a.download = `Resume_${title}_${company}.docx`;
-                      a.click();
-                    }}
-                  >
-                    Download Again
-                  </button>
-                )}
-                {resumeInputTab === 'upload' && (tailorStep === 'done' || tailorError) && (
-                  <button
-                    className="nav-btn nav-btn-outline"
-                    onClick={() => { docxCacheRef.current.delete(tailorModalJob!.id); setIsTailoring(true); runTailorDocx(tailorModalJob!); }}
-                    disabled={isTailoring}
-                  >
-                    Re-tailor
-                  </button>
-                )}
-                {/* Paste flow buttons */}
-                {resumeInputTab === 'paste' && tailoredResume && !isTailoring && (
-                  <button
-                    className="nav-btn nav-btn-outline"
-                    onClick={() => { tailorCacheRef.current.delete(tailorModalJob!.id); runTailorResume(tailorModalJob!); }}
-                  >
-                    Re-tailor
-                  </button>
-                )}
-                {resumeInputTab === 'paste' && tailoredResume && (
-                  <button
-                    className="nav-btn nav-btn-outline"
-                    onClick={handleDownloadResume}
-                    title="Download as HTML (opens in Word)"
-                  >
-                    Download
-                  </button>
-                )}
-                {resumeInputTab === 'paste' && tailoredResume && (
-                  <button
-                    className="nav-btn nav-btn-accent"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(tailoredResume!.replace(/<[^>]*>/g, '').replace(/\n{3,}/g, '\n\n').trim());
-                      setTailorCopied(true);
-                      setTimeout(() => setTailorCopied(false), 2000);
-                    }}
-                  >
-                    {tailorCopied ? '✓ Copied!' : 'Copy to Clipboard'}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <ResumeTailorWorkshop
+          job={tailorModalJob}
+          resumeText={resumeText}
+          resumeDocxFile={resumeDocxFile}
+          resumeInputTab={resumeInputTab}
+          settings={settings}
+          onClose={closeTailorModal}
+        />
       )}
     </div>
   );
