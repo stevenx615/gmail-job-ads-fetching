@@ -19,6 +19,7 @@ export interface TailorQualification {
   isSuggestion: boolean;
   note?: string;
   suggestions: string[];
+  readySentence?: string | null;
   include: boolean;
 }
 
@@ -35,6 +36,7 @@ export interface TailorExperience {
   company: string;
   title: string;
   period: string;
+  location: string;
   bullets: TailorBullet[];
 }
 
@@ -56,8 +58,17 @@ export interface TailorOtherSection {
   items: TailorOtherItem[];
 }
 
+export interface TailorEducation {
+  program: string;
+  school: string;
+  location: string;
+  startDate: string;
+  endDate: string;
+}
+
 export interface TailorAnalysis {
   candidateName: string;
+  contactInfo: string[];
   summary: string;
   atsScore: number;
   matchedKeywords: string[];
@@ -66,7 +77,7 @@ export interface TailorAnalysis {
   qualifications: TailorQualification[];
   experience: TailorExperience[];
   skills: TailorSkill[];
-  education: string[];
+  education: TailorEducation[];
   other: TailorOtherSection[];
 }
 

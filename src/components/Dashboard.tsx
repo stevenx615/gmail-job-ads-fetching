@@ -411,26 +411,8 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
 
   return (
     <div className="dashboard-layout">
-      {/* Stats + Search Bar */}
+      {/* Search Bar */}
       <div className="hero">
-        <div className="stats-row">
-          <div className="stat-card stat-total">
-            <span className="stat-value">{stats.total}</span>
-            <span className="stat-label">Total Jobs</span>
-          </div>
-          {Object.entries(stats.bySource).map(([source, count]) => (
-            <div key={source} className={`stat-card stat-source-${source}`}>
-              <span className="stat-value">{count}</span>
-              <span className="stat-label">{source}</span>
-            </div>
-          ))}
-          {Object.entries(stats.byType).map(([type, count]) => (
-            <div key={type} className={`stat-card stat-type-${type}`}>
-              <span className="stat-value">{count}</span>
-              <span className="stat-label">{type}</span>
-            </div>
-          ))}
-        </div>
         <div className="hero-search">
           <div className="hero-input-group">
             <svg className="hero-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>

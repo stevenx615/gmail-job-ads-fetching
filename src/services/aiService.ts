@@ -466,6 +466,7 @@ RULES:
 Return ONLY valid JSON (no markdown, no code fences, no explanation):
 {
   "candidateName": "Full name from resume header",
+  "contactInfo": ["email@example.com", "555-123-4567", "City, State", "linkedin.com/in/handle"],
   "summary": "3-4 sentence professional summary written specifically for this role",
   "atsScore": 85,
   "matchedKeywords": ["keyword1", "keyword2"],
@@ -477,12 +478,13 @@ Return ONLY valid JSON (no markdown, no code fences, no explanation):
       "match": "relevant text from resume or null if absent",
       "isSuggestion": false,
       "note": "optional coaching note",
-      "suggestions": ["stronger alternative phrasing or suggested addition if not found"],
+      "suggestions": ["coaching hint or description of why this matters (non-selectable, shown as context to the user)"],
+      "readySentence": "A complete, polished resume bullet or phrase ready to paste in — ONLY set when match is null, null otherwise",
       "include": true
     }
   ],
   "experience": [
-    { "company": "Company Name", "title": "Job Title", "period": "Date Range", "bullets": [
+    { "company": "Company Name", "title": "Job Title", "period": "Date Range", "location": "City, State or Remote", "bullets": [
       {
         "text": "EXACT original bullet text from the resume",
         "tailored": "improved version with job-relevant keywords and stronger phrasing",
@@ -496,7 +498,9 @@ Return ONLY valid JSON (no markdown, no code fences, no explanation):
   "skills": [
     { "name": "Skill", "fromResume": true, "isSuggestion": false, "note": "", "include": true }
   ],
-  "education": ["Degree · Institution · Year"],
+  "education": [
+    { "program": "Bachelor of Science in Computer Science", "school": "MIT", "location": "Cambridge, MA", "startDate": "2018", "endDate": "2022" }
+  ],
   "other": [
     { "title": "Section Name", "items": [{ "text": "item text", "include": true }] }
   ]
@@ -540,6 +544,7 @@ export async function analyzeTailorSections(
 
     const analysis: TailorAnalysis = {
       candidateName: String(parsed.candidateName || ''),
+      contactInfo: Array.isArray(parsed.contactInfo) ? parsed.contactInfo.map(String).filter(Boolean) : [],
       summary: String(parsed.summary || ''),
       atsScore: typeof parsed.atsScore === 'number' ? Math.max(0, Math.min(100, parsed.atsScore)) : 0,
       matchedKeywords: Array.isArray(parsed.matchedKeywords) ? parsed.matchedKeywords.map(String) : [],
@@ -552,6 +557,7 @@ export async function analyzeTailorSections(
             isSuggestion: !!q.isSuggestion,
             note: q.note ? String(q.note) : undefined,
             suggestions: Array.isArray(q.suggestions) ? q.suggestions.map(String).filter(Boolean) : [],
+            readySentence: q.readySentence ? String(q.readySentence) : null,
             include: q.include !== false,
           }))
         : [],
@@ -560,6 +566,7 @@ export async function analyzeTailorSections(
             company: String(e.company || ''),
             title: String(e.title || ''),
             period: String(e.period || ''),
+            location: String(e.location || ''),
             bullets: Array.isArray(e.bullets)
               ? e.bullets.map((b: Record<string, unknown>) => ({
                   text: String(b.text || ''),
@@ -581,7 +588,13 @@ export async function analyzeTailorSections(
             include: s.include !== false,
           }))
         : [],
-      education: Array.isArray(parsed.education) ? parsed.education.map(String) : [],
+      education: Array.isArray(parsed.education)
+        ? parsed.education.map((e: Record<string, unknown>) =>
+            typeof e === 'string'
+              ? { program: e, school: '', location: '', startDate: '', endDate: '' }
+              : { program: String(e.program || ''), school: String(e.school || ''), location: String(e.location || ''), startDate: String(e.startDate || ''), endDate: String(e.endDate || '') }
+          )
+        : [],
       other: Array.isArray(parsed.other)
         ? parsed.other.map((o: Record<string, unknown>) => ({
             title: String(o.title || ''),
