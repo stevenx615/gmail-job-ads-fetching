@@ -467,7 +467,7 @@ Return ONLY valid JSON (no markdown, no code fences, no explanation):
 {
   "candidateName": "Full name from resume header",
   "contactInfo": ["email@example.com", "555-123-4567", "City, State", "linkedin.com/in/handle"],
-  "summary": "3-4 sentence professional summary written specifically for this role",
+  "summary": "Professional summary written specifically for this role — maximum 3 sentences",
   "atsScore": 85,
   "matchedKeywords": ["keyword1", "keyword2"],
   "missingKeywords": ["missing1", "missing2"],
@@ -621,6 +621,71 @@ export async function analyzeTailorSections(
       return { analysis: null, error: 'Invalid API key. Check your key in Settings.' };
     }
     return { analysis: null, error: `AI request failed: ${err instanceof Error ? err.message : 'Unknown error'}` };
+  }
+}
+
+export async function regenerateQualification(
+  requirement: string,
+  jobTitle: string,
+  company: string,
+  currentMatch: string | null,
+  settings: AppSettings,
+): Promise<{ text: string | null; error: string | null }> {
+  const { aiProvider, aiApiKey, aiModel } = settings;
+  if (aiProvider === 'none' || !aiApiKey) return { text: null, error: 'No AI provider configured' };
+
+  const model = aiModel || getDefaultModel(aiProvider);
+  const context = currentMatch ? `Current match from resume: "${currentMatch}"` : 'This requirement was not found in the resume.';
+  const prompt = `Write a single resume bullet point that addresses the following job requirement for ${jobTitle} at ${company}.
+
+Requirement: "${requirement}"
+${context}
+
+Rules:
+- Write one concise sentence suitable for a resume qualifications section
+- If a current match is provided, improve or rephrase it to better address the requirement
+- If not found, write a plausible sentence a candidate might add if they have relevant experience
+- Do NOT invent specific metrics or credentials out of thin air
+- Return ONLY the sentence, no quotes, no explanation`;
+
+  try {
+    const text = await callBackendAI(prompt, aiApiKey, model, aiProvider, 200);
+    return { text: text.trim().replace(/^["']|["']$/g, ''), error: null };
+  } catch (err) {
+    if (isCorsError(err)) return { text: null, error: 'Backend not available.' };
+    return { text: null, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+export async function regenerateBullet(
+  originalText: string,
+  jobTitle: string,
+  company: string,
+  keywords: string[],
+  settings: AppSettings,
+): Promise<{ tailored: string | null; error: string | null }> {
+  const { aiProvider, aiApiKey, aiModel } = settings;
+  if (aiProvider === 'none' || !aiApiKey) return { tailored: null, error: 'No AI provider configured' };
+
+  const model = aiModel || getDefaultModel(aiProvider);
+  const kwList = keywords.length > 0 ? keywords.join(', ') : 'none';
+  const prompt = `Rewrite the following resume bullet point to be tailored for the role of ${jobTitle} at ${company}.
+
+Original bullet: "${originalText}"
+
+Target keywords to incorporate naturally (only where accurate): ${kwList}
+
+Rules:
+- Keep the same core achievement or responsibility
+- Do NOT invent metrics or skills not implied by the original
+- Return ONLY the rewritten bullet as a single sentence, no quotes, no explanation`;
+
+  try {
+    const text = await callBackendAI(prompt, aiApiKey, model, aiProvider, 256);
+    return { tailored: text.trim().replace(/^["']|["']$/g, ''), error: null };
+  } catch (err) {
+    if (isCorsError(err)) return { tailored: null, error: 'Backend not available.' };
+    return { tailored: null, error: err instanceof Error ? err.message : 'Unknown error' };
   }
 }
 

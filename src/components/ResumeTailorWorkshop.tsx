@@ -4,7 +4,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Bord
 import type { Job } from '../types';
 import type { AppSettings } from '../types/settings';
 import type { TailorAnalysis, TailorQualification, TailorExperience, TailorSkill, TailorOtherSection, TailorEducation } from '../types/ai';
-import { analyzeTailorSections } from '../services/aiService';
+import { analyzeTailorSections, regenerateBullet, regenerateQualification } from '../services/aiService';
 
 interface Props {
   job: Job;
@@ -123,13 +123,18 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
   const [personalInfo, setPersonalInfo] = useState<PersonalInfo>(DEFAULT_PERSONAL);
   const [personalInclude, setPersonalInclude] = useState<PersonalInfoInclude>(DEFAULT_PERSONAL_INCLUDE);
   const [personalFieldOrder, setPersonalFieldOrder] = useState<(keyof PersonalInfo)[]>(DEFAULT_FIELD_ORDER);
+  const [showSummarySection, setShowSummarySection] = useState(true);
+  const [showRequirementsSection, setShowRequirementsSection] = useState(true);
   const [showSkillsSection, setShowSkillsSection] = useState(true);
+  const [showOtherSection, setShowOtherSection] = useState(true);
   const [reordering, setReordering] = useState(false);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const dragIdx = useRef<number | null>(null);
   const [tab, setTab] = useState<TabKey>('all');
   const [buildDone, setBuildDone] = useState(false);
   const [restored, setRestored] = useState(false);
+  const [regeneratingBullets, setRegeneratingBullets] = useState<Record<string, boolean>>({});
+  const [regeneratingQualifs, setRegeneratingQualifs] = useState<Record<number, boolean>>({});
 
   const applyAnalysis = (a: TailorAnalysis) => {
     setAnalysis(a);
@@ -184,7 +189,10 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
           return e as TailorEducation & { include: boolean };
         }));
         setOther(saved.other);
+        if (saved.showSummarySection !== undefined) setShowSummarySection(saved.showSummarySection);
+        if (saved.showRequirementsSection !== undefined) setShowRequirementsSection(saved.showRequirementsSection);
         if (saved.showSkillsSection !== undefined) setShowSkillsSection(saved.showSkillsSection);
+        if (saved.showOtherSection !== undefined) setShowOtherSection(saved.showOtherSection);
         if (saved.personalInfo) setPersonalInfo(saved.personalInfo);
         if (saved.personalInclude) setPersonalInclude(saved.personalInclude);
         if (saved.personalFieldOrder) setPersonalFieldOrder(saved.personalFieldOrder);
@@ -222,8 +230,8 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
   // Auto-save whenever user edits any section
   useEffect(() => {
     if (phase !== 'review' || !analysis) return;
-    saveTailorState(job.id, { analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, other, showSkillsSection, personalInfo, personalInclude, personalFieldOrder });
-  }, [phase, analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, other, showSkillsSection, personalInfo, personalInclude, personalFieldOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+    saveTailorState(job.id, { analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, other, showSummarySection, showRequirementsSection, showSkillsSection, showOtherSection, personalInfo, personalInclude, personalFieldOrder });
+  }, [phase, analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, other, showSummarySection, showRequirementsSection, showSkillsSection, showOtherSection, personalInfo, personalInclude, personalFieldOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reanalyze = () => { setRestored(false); runAnalysis(plainResume); };
 
@@ -242,6 +250,34 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
     setOther(prev => prev.map((sec, i) => i !== si ? sec : {
       ...sec, items: sec.items.map((item, j) => j !== ii ? item : { ...item, include: !item.include }),
     }));
+
+  const handleRegenerateBullet = async (ei: number, bi: number) => {
+    const key = `${ei}-${bi}`;
+    const bullet = experience[ei]?.bullets[bi];
+    if (!bullet) return;
+    setRegeneratingBullets(prev => ({ ...prev, [key]: true }));
+    const result = await regenerateBullet(bullet.text, job.title, job.company, bullet.keywords, settings);
+    if (result.tailored) {
+      setExperience(prev => prev.map((ex, i) => i !== ei ? ex : {
+        ...ex,
+        bullets: ex.bullets.map((b, j) => j !== bi ? b : { ...b, tailored: result.tailored! }),
+      }));
+    }
+    setRegeneratingBullets(prev => ({ ...prev, [key]: false }));
+  };
+
+  const handleRegenerateQualif = async (idx: number) => {
+    const q = qualifications[idx];
+    if (!q) return;
+    setRegeneratingQualifs(prev => ({ ...prev, [idx]: true }));
+    const currentMatch = qualifOverrides[idx] ?? q.match;
+    const result = await regenerateQualification(q.requirement, job.title, job.company, currentMatch, settings);
+    if (result.text) {
+      setQualifOverrides(prev => { const n = [...prev]; n[idx] = result.text; return n; });
+      setQualifications(prev => prev.map((qi, i) => i === idx ? { ...qi, include: true } : qi));
+    }
+    setRegeneratingQualifs(prev => ({ ...prev, [idx]: false }));
+  };
 
   // Flat bullets for experience tab
   type FlatBullet = { ei: number; bi: number; exp: TailorExperience; bullet: (typeof experience)[0]['bullets'][0] };
@@ -281,7 +317,7 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
     }
 
     // Summary
-    if (summary.trim()) {
+    if (showSummarySection && summary.trim()) {
       content += `<div class="r-section">Professional Summary</div><p>${summary.replace(/\n/g, '<br>')}</p>`;
     }
 
@@ -289,7 +325,7 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
     const includedQualifs = qualifications
       .map((q, i) => ({ ...q, effectiveText: qualifOverrides[i] ?? q.match }))
       .filter(q => q.include && q.effectiveText);
-    if (includedQualifs.length > 0) {
+    if (showRequirementsSection && includedQualifs.length > 0) {
       content += `<div class="r-section">Key Qualifications</div><ul>${includedQualifs.map(q => `<li>${q.effectiveText}</li>`).join('')}</ul>`;
     }
 
@@ -306,7 +342,7 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
       for (const exp of expSections) {
         content += `<div class="exp-block">`;
         content += `<div class="exp-hdr"><span class="exp-title">${exp.title}</span><span class="exp-period">${exp.period || ''}</span></div>`;
-        const expMeta = [exp.company, exp.location].filter(Boolean).join(' · ');
+        const expMeta = [exp.company, exp.location].filter(Boolean).join(', ');
         if (expMeta) content += `<div class="exp-meta">${expMeta}</div>`;
         content += `<ul>${exp.bullets.map(b => `<li>${b}</li>`).join('')}</ul>`;
         content += `</div>`;
@@ -319,8 +355,11 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
       content += `<div class="r-section">Education</div>`;
       for (const e of includedEdu) {
         const datePart = [e.startDate, e.endDate].filter(Boolean).join(' – ');
-        const meta = [e.school, e.location, datePart].filter(Boolean).join(' · ');
-        content += `<div class="exp-block"><div class="exp-title">${e.program || ''}</div>${meta ? `<div class="exp-meta">${meta}</div>` : ''}</div>`;
+        const eduMeta = [e.school, e.location].filter(Boolean).join(', ');
+        content += `<div class="exp-block">`;
+        content += `<div class="exp-hdr"><span class="exp-title">${e.program || ''}</span><span class="exp-period">${datePart}</span></div>`;
+        if (eduMeta) content += `<div class="exp-meta">${eduMeta}</div>`;
+        content += `</div>`;
       }
     }
 
@@ -331,7 +370,7 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
     }
 
     // Other sections
-    for (const sec of other) {
+    if (showOtherSection) for (const sec of other) {
       const items = sec.items.filter(i => i.include);
       if (items.length > 0) {
         content += `<div class="r-section">${sec.title}</div><ul>${items.map(i => `<li>${i.text}</li>`).join('')}</ul>`;
@@ -358,7 +397,7 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
 .skills-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
 .skill-chip{font-size:10px;padding:2px 9px;border-radius:20px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc}
 </style></head><body><div class="paper">${content || empty}</div></body></html>`;
-  }, [analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, other, personalInfo, personalInclude, personalFieldOrder]);
+  }, [analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, other, showSummarySection, showRequirementsSection, showSkillsSection, showOtherSection, personalInfo, personalInclude, personalFieldOrder]);
 
   const buildResume = async () => {
     if (!analysis) return;
@@ -375,7 +414,7 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
     const bullet = (text: string) => new Paragraph({
       bullet: { level: 0 },
       children: [new TextRun({ text, size: 20 })],
-      spacing: { after: 120 },
+      spacing: { after: 80 },
     });
 
     const children: Paragraph[] = [];
@@ -413,14 +452,14 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
     }
 
     // Summary
-    if (summary) {
+    if (showSummarySection && summary) {
       children.push(sectionHeading('Professional Summary'));
       children.push(new Paragraph({ children: [new TextRun({ text: summary, size: 20 })], spacing: { after: 80 } }));
     }
 
     // Qualifications
     const includedQualifs = qualifications.filter(q => q.include);
-    if (includedQualifs.length > 0) {
+    if (showRequirementsSection && includedQualifs.length > 0) {
       children.push(sectionHeading('Qualifications'));
       includedQualifs.forEach((q, idx) => {
         const text = qualifOverrides[qualifications.indexOf(q)] ?? q.match ?? q.readySentence ?? q.requirement;
@@ -438,14 +477,20 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
       children.push(sectionHeading('Work Experience'));
       includedExp.forEach((exp, ei) => {
         const expIdx = experience.indexOf(exp);
+        // Line 1: title (left) · period (right)
         children.push(new Paragraph({
           children: [
             new TextRun({ text: exp.title, bold: true, size: 20 }),
-            ...(exp.company ? [new TextRun({ text: `  ·  ${exp.company}`, size: 20 })] : []),
-            ...(exp.location ? [new TextRun({ text: `  ·  ${exp.location}`, size: 20, italics: true })] : []),
-            ...(exp.period ? [new TextRun({ text: `  ${exp.period}`, size: 20, italics: true })] : []),
+            ...(exp.period ? [new TextRun({ text: '\t' + exp.period, size: 20, bold: true, italics: true })] : []),
           ],
-          spacing: { before: 120, after: 40 },
+          tabStops: [{ type: 'right', position: 10440 }],
+          spacing: { before: 120, after: 20 },
+        }));
+        // Line 2: company · location
+        const expMeta = [exp.company, exp.location].filter(Boolean).join(', ');
+        if (expMeta) children.push(new Paragraph({
+          children: [new TextRun({ text: expMeta, size: 20, italics: true })],
+          spacing: { after: 40 },
         }));
         exp.bullets.forEach((b, bi) => {
           if (!b.include) return;
@@ -472,21 +517,23 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
       children.push(sectionHeading('Education'));
       includedEdu.forEach(e => {
         const datePart = [e.startDate, e.endDate].filter(Boolean).join(' – ');
+        // Line 1: program (left) · date range (right)
         children.push(new Paragraph({
           children: [
             new TextRun({ text: e.program || '', bold: true, size: 20 }),
-            ...(e.school ? [new TextRun({ text: `  ·  ${e.school}`, size: 20 })] : []),
-            ...(datePart ? [new TextRun({ text: `  ${datePart}`, size: 20, italics: true })] : []),
+            ...(datePart ? [new TextRun({ text: '\t' + datePart, size: 20, bold: true, italics: true })] : []),
           ],
+          tabStops: [{ type: 'right', position: 10440 }],
           spacing: { before: 80, after: 20 },
         }));
-        const meta = [e.location].filter(Boolean).join('');
-        if (meta) children.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, italics: true })], spacing: { after: 80 } }));
+        // Line 2: school, location
+        const eduMeta = [e.school, e.location].filter(Boolean).join(', ');
+        if (eduMeta) children.push(new Paragraph({ children: [new TextRun({ text: eduMeta, size: 20, italics: true })], spacing: { after: 80 } }));
       });
     }
 
     // Other sections
-    other.forEach(sec => {
+    if (showOtherSection) other.forEach(sec => {
       const includedItems = sec.items.filter(i => i.include);
       if (includedItems.length === 0) return;
       children.push(sectionHeading(sec.title));
@@ -666,8 +713,18 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
               {/* Summary */}
               {activeSection === 'summary' && <>
                 <div className="ws-editor-header">
-                  <div className="ws-editor-section-title">Professional Summary</div>
-                  <div className="ws-editor-subtitle">Edit your tailored summary for {job.title} at {job.company}</div>
+                  <div>
+                    <div className="ws-editor-section-title">Professional Summary</div>
+                    <div className="ws-editor-subtitle">Edit your tailored summary for {job.title} at {job.company}</div>
+                  </div>
+                  <button
+                    className={`ws-toggle${showSummarySection ? ' on' : ''}`}
+                    onClick={() => setShowSummarySection(s => !s)}
+                    aria-label={showSummarySection ? 'Hide summary section' : 'Show summary section'}
+                    title={showSummarySection ? 'Hide from resume' : 'Show in resume'}
+                  >
+                    <span className="ws-toggle-thumb" />
+                  </button>
                 </div>
                 <div className="ws-editor-body">
                   <textarea
@@ -683,10 +740,20 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
               {/* Requirements */}
               {activeSection === 'requirements' && <>
                 <div className="ws-editor-header">
-                  <div className="ws-editor-section-title">Requirements Match</div>
-                  <div className="ws-editor-subtitle">
-                    {qualifications.filter(q => q.include).length} of {qualifications.length} selected — check items to include in your resume
+                  <div>
+                    <div className="ws-editor-section-title">Requirements Match</div>
+                    <div className="ws-editor-subtitle">
+                      {qualifications.filter(q => q.include).length} of {qualifications.length} selected — check items to include in your resume
+                    </div>
                   </div>
+                  <button
+                    className={`ws-toggle${showRequirementsSection ? ' on' : ''}`}
+                    onClick={() => setShowRequirementsSection(s => !s)}
+                    aria-label={showRequirementsSection ? 'Hide requirements section' : 'Show requirements section'}
+                    title={showRequirementsSection ? 'Hide from resume' : 'Show in resume'}
+                  >
+                    <span className="ws-toggle-thumb" />
+                  </button>
                 </div>
                 <div className="ws-editor-body">
                   {qualifications.length === 0
@@ -724,6 +791,22 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
                                   </button>
                                 )}
                               </>
+                            )}
+                            {regeneratingQualifs[idx] ? (
+                              <div className="ws-bullet-regen-msg">
+                                <span className="badge-selector-ai-spinner" />
+                                Regenerating…
+                              </div>
+                            ) : (
+                              <div className="ws-qualif-hover-bar">
+                                <button
+                                  className="ws-bullet-regen-btn"
+                                  title="Regenerate suggestion"
+                                  onClick={() => handleRegenerateQualif(idx)}
+                                >
+                                  ↺ Regenerate
+                                </button>
+                              </div>
                             )}
                           </div>
                         );
@@ -777,7 +860,36 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
                             return (
                               <div key={bi} className={`ws-row ws-row-${bullet.matchLevel}`}>
                                 <div className="ws-cell ws-cell-original">{bullet.text}</div>
-                                <div className="ws-cell ws-cell-tailored">{bullet.tailored || bullet.text}</div>
+                                <div className="ws-cell ws-cell-tailored">
+                                  {regeneratingBullets[`${ei}-${bi}`] ? (
+                                    <div className="ws-bullet-regen-msg">
+                                      <span className="badge-selector-ai-spinner" />
+                                      Regenerating…
+                                    </div>
+                                  ) : (
+                                    <textarea
+                                      className="ws-tailored-edit"
+                                      value={bullet.tailored || bullet.text}
+                                      rows={1}
+                                      onInput={e => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }}
+                                      ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
+                                      onChange={e => setExperience(prev => prev.map((ex, i) => i !== ei ? ex : {
+                                        ...ex,
+                                        bullets: ex.bullets.map((b, j) => j !== bi ? b : { ...b, tailored: e.target.value }),
+                                      }))}
+                                    />
+                                  )}
+                                  <div className="ws-tailored-hover-bar">
+                                    <button
+                                      className="ws-bullet-regen-btn"
+                                      title="Regenerate tailored version"
+                                      disabled={regeneratingBullets[`${ei}-${bi}`]}
+                                      onClick={() => handleRegenerateBullet(ei, bi)}
+                                    >
+                                      ↺ Regenerate
+                                    </button>
+                                  </div>
+                                </div>
                                 <div className="ws-cell ws-cell-keywords">
                                   {bullet.keywords.map((kw, ki) => <span key={ki} className="ws-kw-chip">{kw}</span>)}
                                 </div>
@@ -905,8 +1017,18 @@ li{margin-bottom:3px;font-size:11px;color:#c5cee8}
               {/* Other */}
               {activeSection === 'other' && <>
                 <div className="ws-editor-header">
-                  <div className="ws-editor-section-title">Additional Sections</div>
-                  <div className="ws-editor-subtitle">Toggle items to include in your resume</div>
+                  <div>
+                    <div className="ws-editor-section-title">Additional Sections</div>
+                    <div className="ws-editor-subtitle">Toggle items to include in your resume</div>
+                  </div>
+                  <button
+                    className={`ws-toggle${showOtherSection ? ' on' : ''}`}
+                    onClick={() => setShowOtherSection(s => !s)}
+                    aria-label={showOtherSection ? 'Hide additional sections' : 'Show additional sections'}
+                    title={showOtherSection ? 'Hide from resume' : 'Show in resume'}
+                  >
+                    <span className="ws-toggle-thumb" />
+                  </button>
                 </div>
                 <div className="ws-editor-body">
                   {other.filter(s => s.items.length > 0).length > 0
