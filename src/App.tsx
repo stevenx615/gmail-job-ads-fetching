@@ -15,7 +15,7 @@ function AppContent() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'applications'>('dashboard');
+  const [showApplications, setShowApplications] = useState(false);
   const [applicationsCount, setApplicationsCount] = useState(0);
   const { isSignedIn } = useGmailAuth();
 
@@ -75,23 +75,6 @@ function AppContent() {
             </svg>
             <span>Gmail Job Parser</span>
           </div>
-          <div className="nav-tabs">
-            <button
-              className={`nav-tab${activeTab === 'dashboard' ? ' active' : ''}`}
-              onClick={() => setActiveTab('dashboard')}
-            >
-              Dashboard
-            </button>
-            <button
-              className={`nav-tab${activeTab === 'applications' ? ' active' : ''}`}
-              onClick={() => setActiveTab('applications')}
-            >
-              Applications
-              {applicationsCount > 0 && (
-                <span className="nav-tab-badge">{applicationsCount}</span>
-              )}
-            </button>
-          </div>
           <div className="navbar-actions">
             <FetchEmailsPanel onFetchComplete={handleFetchComplete} />
             {isSignedIn && (
@@ -104,6 +87,15 @@ function AppContent() {
               </button>
             )}
             <GmailConnectButton />
+            <button
+              className={`nav-btn nav-btn-applications${showApplications ? ' active' : ''}`}
+              onClick={() => setShowApplications(true)}
+            >
+              Applications
+              {applicationsCount > 0 && (
+                <span className="nav-tab-badge">{applicationsCount}</span>
+              )}
+            </button>
             <button
               className="nav-btn-settings"
               onClick={() => setShowSettings(true)}
@@ -120,10 +112,7 @@ function AppContent() {
 
       {/* Main Content */}
       <main className="main-content">
-        {activeTab === 'dashboard'
-          ? <Dashboard refreshTrigger={refreshTrigger} />
-          : <ApplicationsView refreshTrigger={refreshTrigger} />
-        }
+        <Dashboard refreshTrigger={refreshTrigger} />
       </main>
 
       {/* Settings Modal */}
@@ -132,6 +121,21 @@ function AppContent() {
           onClose={() => setShowSettings(false)}
           onSettingsSaved={handleSettingsSaved}
         />
+      )}
+
+      {/* Applications Fullscreen Modal */}
+      {showApplications && (
+        <div className="modal-overlay" onClick={() => setShowApplications(false)}>
+          <div className="applications-modal" onClick={e => e.stopPropagation()}>
+            <div className="applications-modal-header">
+              <span className="modal-title">Applications</span>
+              <button className="modal-close" onClick={() => setShowApplications(false)}>&times;</button>
+            </div>
+            <div className="applications-modal-body">
+              <ApplicationsView refreshTrigger={refreshTrigger} />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Parser Debug Modal */}

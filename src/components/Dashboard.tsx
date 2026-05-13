@@ -455,7 +455,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
           {hasFilters && (
             <button className="hero-clear-btn" onClick={clearAllFilters} title="Clear all filters">&times;</button>
           )}
-          <button className="hero-search-btn" onClick={() => {}}>Search Jobs</button>
+          <button className="hero-search-btn" onClick={() => {}} title="Search Jobs">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="16.5" y1="16.5" x2="22" y2="22" />
+            </svg>
+          </button>
         </div>
         {(settings.popularKeywords ?? []).length > 0 && (
           <div className="hero-tags">
