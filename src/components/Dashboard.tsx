@@ -10,9 +10,10 @@ import { ResumeTailorWorkshop } from './ResumeTailorWorkshop';
 
 interface DashboardProps {
   refreshTrigger: number;
+  onJobsChanged?: () => void;
 }
 
-export function Dashboard({ refreshTrigger }: DashboardProps) {
+export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
   // Re-read settings whenever refreshTrigger changes (e.g. after settings saved)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const settings = useMemo(() => getSettings(), [refreshTrigger]);
@@ -285,6 +286,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
   const handleDelete = async (id: string) => {
     await deleteJob(id);
     setJobs(prev => prev.filter(j => j.id !== id));
+    onJobsChanged?.();
   };
 
   const handleSave = async (id: string) => {
@@ -301,6 +303,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
     const newApplied = !job.applied;
     await toggleJobApplied(id, newApplied);
     setJobs(prev => prev.map(j => j.id === id ? { ...j, applied: newApplied } : j));
+    onJobsChanged?.();
   };
 
   const toggleRead = async (jobId: string, read: boolean) => {

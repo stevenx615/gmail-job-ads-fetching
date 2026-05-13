@@ -48,27 +48,30 @@ function AppContent() {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshCount = useCallback(() => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
     getAllJobs().then(jobs => {
-      if (!cancelled) {
-        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-        setApplicationsCount(
-          jobs.filter(j => {
-            const stage = j.applicationStage ?? (j.applied ? 'applied' : j.saved ? 'saved' : null);
-            if (!stage || stage === 'saved' || stage === 'rejected') return false;
-            const date = j.stageDate
-              ? new Date(j.stageDate).getTime()
-              : j.dateReceived
-                ? new Date(j.dateReceived).getTime()
-                : j.createdAt?.toMillis?.() ?? 0;
-            return date >= cutoff;
-          }).length
-        );
-      }
+      setApplicationsCount(
+        jobs.filter(j => {
+          const stage = j.applicationStage ?? (j.applied ? 'applied' : j.saved ? 'saved' : null);
+          if (!stage || stage === 'saved' || stage === 'rejected') return false;
+          const date = j.stageDate
+            ? new Date(j.stageDate).getTime()
+            : j.dateReceived
+              ? new Date(j.dateReceived).getTime()
+              : j.createdAt?.toMillis?.() ?? 0;
+          return date >= cutoff;
+        }).length
+      );
     }).catch(err => console.error('[App] applicationsCount fetch failed:', err));
-    return () => { cancelled = true; };
-  }, [refreshTrigger]);
+  }, []);
+
+  useEffect(() => { refreshCount(); }, [refreshTrigger, refreshCount]);
+
+  // Triggers both a Dashboard reload and badge count refresh
+  const handleJobsChanged = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   return (
     <div className="app-layout">
@@ -119,7 +122,7 @@ function AppContent() {
 
       {/* Main Content */}
       <main className="main-content">
-        <Dashboard refreshTrigger={refreshTrigger} />
+        <Dashboard refreshTrigger={refreshTrigger} onJobsChanged={handleJobsChanged} />
       </main>
 
       {/* Settings Modal */}
@@ -142,7 +145,7 @@ function AppContent() {
               <button className="modal-close" onClick={() => setShowApplications(false)}>&times;</button>
             </div>
             <div className="applications-modal-body">
-              <ApplicationsView refreshTrigger={refreshTrigger} />
+              <ApplicationsView refreshTrigger={refreshTrigger} onJobsChanged={handleJobsChanged} />
             </div>
           </div>
         </div>

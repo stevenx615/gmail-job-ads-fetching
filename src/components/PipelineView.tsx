@@ -147,9 +147,10 @@ interface EditingCell {
 interface TableProps {
   jobs: Job[];
   onJobUpdate: (id: string, patch: Partial<Job>) => void;
+  onJobsChanged?: () => void;
 }
 
-function PipelineTable({ jobs, onJobUpdate }: TableProps) {
+function PipelineTable({ jobs, onJobUpdate, onJobsChanged }: TableProps) {
   // ── Filter state ──
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<ApplicationStage | 'all'>('all');
@@ -255,6 +256,7 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     try {
       await updateJobStage(rowId, newStage, date);
       setCellErrors(prev => { const next = { ...prev }; delete next[`${rowId}-stage`]; return next; });
+      onJobsChanged?.();
     } catch {
       onJobUpdate(rowId, { applicationStage: oldStage ?? undefined, stageDate: oldStageDate });
       setCellErrors(prev => ({ ...prev, [`${rowId}-stage`]: 'Failed to update stage' }));
@@ -298,6 +300,7 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
     onJobUpdate(job.id, { applied: false, applicationStage: undefined, stageDate: undefined });
     try {
       await removeFromApplications(job.id);
+      onJobsChanged?.();
     } catch {
       onJobUpdate(job.id, { applicationStage: oldStage ?? undefined, stageDate: oldStageDate, applied: job.applied });
     }
@@ -602,9 +605,10 @@ function PipelineTable({ jobs, onJobUpdate }: TableProps) {
 
 interface PipelineViewProps {
   refreshTrigger: number;
+  onJobsChanged?: () => void;
 }
 
-export function ApplicationsView({ refreshTrigger }: PipelineViewProps) {
+export function ApplicationsView({ refreshTrigger, onJobsChanged }: PipelineViewProps) {
   const [allJobs, setAllJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -650,7 +654,7 @@ export function ApplicationsView({ refreshTrigger }: PipelineViewProps) {
     <div className="pipeline-view">
       <PipelineStatsBar jobs={allJobs} />
       <div className="pipeline-table-card">
-        <PipelineTable jobs={allJobs} onJobUpdate={handleJobUpdate} />
+        <PipelineTable jobs={allJobs} onJobUpdate={handleJobUpdate} onJobsChanged={onJobsChanged} />
       </div>
     </div>
   );
