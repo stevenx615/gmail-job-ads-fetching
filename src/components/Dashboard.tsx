@@ -406,7 +406,14 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
       hasResume;
   };
 
-  if (loading) return <div className="state-message">Loading jobs...</div>;
+  if (loading) return (
+    <div className="jobs-loading">
+      <div className="jobs-loading-orbs">
+        <span /><span /><span />
+      </div>
+      <div className="jobs-loading-text">Loading jobs<span className="jobs-loading-dots"><span>.</span><span>.</span><span>.</span></span></div>
+    </div>
+  );
   if (error) return <div className="state-message state-error">{error}</div>;
 
   return (
@@ -452,9 +459,12 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
               </div>
             )}
           </div>
-          {hasFilters && (
-            <button className="hero-clear-btn" onClick={clearAllFilters} title="Clear all filters">&times;</button>
-          )}
+          <button
+            className="hero-clear-btn"
+            onClick={clearAllFilters}
+            title="Clear all filters"
+            style={{ visibility: hasFilters ? 'visible' : 'hidden' }}
+          >&times;</button>
           <button className="hero-search-btn" onClick={() => {}} title="Search Jobs">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="7" />
@@ -660,7 +670,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                             onClick={() => handleApplied(job.id)}
                             title={job.applied ? 'Mark as not applied' : 'Mark as applied'}
                           >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill={job.applied ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M7.3,11.4,10.1,3a.6.6,0,0,1,.8-.3l1,.5a2.6,2.6,0,0,1,1.4,2.3V9.4h6.4a2,2,0,0,1,1.9,2.5l-2,8a2,2,0,0,1-1.9,1.5H4.3a2,2,0,0,1-2-2v-6a2,2,0,0,1,2-2h3v10"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill={job.applied ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                           </button>
                           <button
                             className={`card-icon-btn card-btn-read ${job.read ? 'read' : ''}`}
@@ -699,7 +709,7 @@ export function Dashboard({ refreshTrigger }: DashboardProps) {
                       <div className="job-card-tags">
                         {job.applied && (
                           <span className="applied-badge">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2"><path d="M7.3,11.4,10.1,3a.6.6,0,0,1,.8-.3l1,.5a2.6,2.6,0,0,1,1.4,2.3V9.4h6.4a2,2,0,0,1,1.9,2.5l-2,8a2,2,0,0,1-1.9,1.5H4.3a2,2,0,0,1-2-2v-6a2,2,0,0,1,2-2h3v10"/></svg>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                             Applied
                           </span>
                         )}
