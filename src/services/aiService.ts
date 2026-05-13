@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import type { BadgeSuggestions, AIJobContext, TailorAnalysis, AnalyzeTailorResult } from '../types/ai';
+import type { BadgeSuggestions, AIJobContext, TailorAnalysis, AnalyzeTailorResult, CustomSection } from '../types/ai';
 import type { AppSettings } from '../types/settings';
 import { getBadgeCategoriesForJobType } from '../constants/badgeDefinitions';
 
@@ -496,15 +496,37 @@ Return ONLY valid JSON (no markdown, no code fences, no explanation):
     ]}
   ],
   "skills": [
-    { "name": "Skill", "fromResume": true, "isSuggestion": false, "note": "", "include": true }
+    { "name": "Skill", "category": "Languages", "fromResume": true, "isSuggestion": false, "note": "", "include": true }
   ],
   "education": [
     { "program": "Bachelor of Science in Computer Science", "school": "MIT", "location": "Cambridge, MA", "startDate": "2018", "endDate": "2022" }
   ],
-  "other": [
-    { "title": "Section Name", "items": [{ "text": "item text", "include": true }] }
+  "customSections": [
+    {
+      "type": "volunteer",
+      "title": "Volunteer Experience",
+      "entries": [{ "fields": { "org": "Red Cross", "role": "Coordinator", "period": "2020–2021", "location": "NYC", "description": "Led weekly food drives..." } }]
+    },
+    {
+      "type": "certifications",
+      "title": "Certifications",
+      "entries": [{ "fields": { "name": "AWS Solutions Architect", "issuer": "Amazon", "date": "2022", "link": "" } }]
+    }
   ]
 }
+
+Skill category values to use (pick the closest fit):
+"Languages" · "Frameworks" · "Databases" · "Cloud & DevOps" · "Tools" · "Soft Skills" · "Other"
+
+Known customSection types and field keys — only include types actually present in the resume:
+- volunteer: org, role, period, location, description
+- additional: company, role, period, location, description
+- projects: name, tech, period, link, description
+- certifications: name, issuer, date, link
+- publications: title, publisher, date, link
+- awards: title, issuer, date, description
+- languages: language, proficiency
+- courses: name, institution, date
 
 Job: ${jobTitle} at ${company}
 
@@ -558,7 +580,7 @@ export async function analyzeTailorSections(
             note: q.note ? String(q.note) : undefined,
             suggestions: Array.isArray(q.suggestions) ? q.suggestions.map(String).filter(Boolean) : [],
             readySentence: q.readySentence ? String(q.readySentence) : null,
-            include: q.include !== false,
+            include: q.match ? q.include !== false : false,
           }))
         : [],
       experience: Array.isArray(parsed.experience)
@@ -567,6 +589,7 @@ export async function analyzeTailorSections(
             title: String(e.title || ''),
             period: String(e.period || ''),
             location: String(e.location || ''),
+            include: true,
             bullets: Array.isArray(e.bullets)
               ? e.bullets.map((b: Record<string, unknown>) => ({
                   text: String(b.text || ''),
@@ -582,6 +605,7 @@ export async function analyzeTailorSections(
       skills: Array.isArray(parsed.skills)
         ? parsed.skills.map((s: Record<string, unknown>) => ({
             name: String(s.name || ''),
+            category: String(s.category || 'Other'),
             fromResume: !!s.fromResume,
             isSuggestion: !!s.isSuggestion,
             note: s.note ? String(s.note) : undefined,
@@ -595,15 +619,20 @@ export async function analyzeTailorSections(
               : { program: String(e.program || ''), school: String(e.school || ''), location: String(e.location || ''), startDate: String(e.startDate || ''), endDate: String(e.endDate || '') }
           )
         : [],
-      other: Array.isArray(parsed.other)
-        ? parsed.other.map((o: Record<string, unknown>) => ({
-            title: String(o.title || ''),
-            items: Array.isArray(o.items)
-              ? o.items.map((item: Record<string, unknown>) => ({
-                  text: String(item.text || ''),
-                  include: item.include !== false,
+      customSections: Array.isArray(parsed.customSections)
+        ? parsed.customSections.map((s: Record<string, unknown>, i: number): CustomSection => ({
+            id: `ai-${i}-${Date.now()}`,
+            type: String(s.type || 'other'),
+            title: String(s.title || ''),
+            entries: Array.isArray(s.entries)
+              ? s.entries.map((e: Record<string, unknown>) => ({
+                  fields: (typeof e.fields === 'object' && e.fields !== null)
+                    ? Object.fromEntries(Object.entries(e.fields as Record<string, unknown>).map(([k, v]) => [k, String(v ?? '')]))
+                    : {},
+                  include: true,
                 }))
               : [],
+            include: true,
           }))
         : [],
     };
@@ -654,6 +683,56 @@ Rules:
   } catch (err) {
     if (isCorsError(err)) return { text: null, error: 'Backend not available.' };
     return { text: null, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+export async function suggestBullet(
+  expTitle: string,
+  expCompany: string,
+  jobTitle: string,
+  jobCompany: string,
+  jobDescription: string,
+  matchedKeywords: string[],
+  settings: AppSettings,
+): Promise<{ text: string | null; keywords: string[]; error: string | null }> {
+  const { aiProvider, aiApiKey, aiModel } = settings;
+  if (aiProvider === 'none' || !aiApiKey) return { text: null, keywords: [], error: 'No AI provider configured' };
+
+  const model = aiModel || getDefaultModel(aiProvider);
+  const kwList = matchedKeywords.length > 0 ? matchedKeywords.slice(0, 15).join(', ') : 'none';
+  const prompt = `Generate a single resume bullet point for a ${expTitle} at ${expCompany}, applying for ${jobTitle} at ${jobCompany}.
+
+Job description excerpt:
+${jobDescription.slice(0, 800)}
+
+Relevant keywords: ${kwList}
+
+Rules:
+- Start with a strong action verb
+- Be specific and achievement-focused
+- Incorporate 1-3 of the relevant keywords naturally where accurate
+- Keep to one concise sentence
+- Do NOT fabricate specific metrics not implied by context
+- Return ONLY a JSON object (no markdown): {"text": "the bullet text", "keywords": ["kw1", "kw2"]}
+  where keywords are items from the relevant keywords list that appear in the bullet`;
+
+  try {
+    const raw = await callBackendAI(prompt, aiApiKey, model, aiProvider, 256);
+    let cleaned = raw.trim();
+    const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) cleaned = fenceMatch[1].trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      const text = cleaned.replace(/^["']|["']$/g, '');
+      return { text, keywords: [], error: null };
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    const text = String(parsed.text || '').replace(/^["']|["']$/g, '');
+    const keywords = Array.isArray(parsed.keywords) ? parsed.keywords.map(String).filter(Boolean) : [];
+    return { text, keywords, error: null };
+  } catch (err) {
+    if (isCorsError(err)) return { text: null, keywords: [], error: 'Backend not available.' };
+    return { text: null, keywords: [], error: err instanceof Error ? err.message : 'Unknown error' };
   }
 }
 

@@ -38,24 +38,29 @@ export interface TailorExperience {
   period: string;
   location: string;
   bullets: TailorBullet[];
+  include?: boolean;
 }
 
 export interface TailorSkill {
   name: string;
+  category: string;
   fromResume: boolean;
   isSuggestion: boolean;
   note?: string;
   include: boolean;
 }
 
-export interface TailorOtherItem {
-  text: string;
+export interface CustomSectionEntry {
+  fields: Record<string, string>;
   include: boolean;
 }
 
-export interface TailorOtherSection {
+export interface CustomSection {
+  id: string;
+  type: string;
   title: string;
-  items: TailorOtherItem[];
+  entries: CustomSectionEntry[];
+  include: boolean;
 }
 
 export interface TailorEducation {
@@ -78,7 +83,7 @@ export interface TailorAnalysis {
   experience: TailorExperience[];
   skills: TailorSkill[];
   education: TailorEducation[];
-  other: TailorOtherSection[];
+  customSections: CustomSection[];
 }
 
 export interface AnalyzeTailorResult {
