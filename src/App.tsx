@@ -125,10 +125,13 @@ function AppContent() {
 
       {/* Applications Fullscreen Modal */}
       {showApplications && (
-        <div className="modal-overlay" onClick={() => setShowApplications(false)}>
+        <div className="modal-overlay applications-modal-overlay" onClick={() => setShowApplications(false)}>
           <div className="applications-modal" onClick={e => e.stopPropagation()}>
             <div className="applications-modal-header">
-              <span className="modal-title">Applications</span>
+              <div>
+                <div className="modal-title">Applications</div>
+                <div className="applications-modal-subtitle">Track and manage all your job applications in one place.</div>
+              </div>
               <button className="modal-close" onClick={() => setShowApplications(false)}>&times;</button>
             </div>
             <div className="applications-modal-body">
