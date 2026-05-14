@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import mammoth from 'mammoth';
 import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged } from '../services/jobService';
 import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
@@ -35,17 +34,8 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
   const [badgeSelectorOpenId, setBadgeSelectorOpenId] = useState<string | null>(null);
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [scrapingJobIds, setScrapingJobIds] = useState<Set<string>>(new Set());
-  const [resumeText, setResumeText] = useState(() => localStorage.getItem('resumeText') || '');
-  const [resumeModalOpen, setResumeModalOpen] = useState(false);
   const [tailorModalJob, setTailorModalJob] = useState<Job | null>(null);
-  const [resumeDocxFile, setResumeDocxFile] = useState<File | null>(null);
-  const [docxPreviewHtml, setDocxPreviewHtml] = useState(() => localStorage.getItem('docxPreviewHtml') || '');
-  const [resumeInputTab, setResumeInputTab] = useState<'upload' | 'paste'>(
-    () => (localStorage.getItem('resumeMode') as 'upload' | 'paste') || 'upload'
-  );
   const jobListRef = useRef<HTMLDivElement>(null);
-  const resumeEditorRef = useRef<HTMLDivElement>(null);
-  const docxInputRef = useRef<HTMLInputElement>(null);
   const pageSize = settings.jobsPerPage;
 
   const loadJobs = useCallback(async () => {
@@ -75,41 +65,6 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
     loadJobs();
   }, [loadJobs, refreshTrigger]);
 
-  // Restore uploaded DOCX file from localStorage on mount
-  useEffect(() => {
-    const data = localStorage.getItem('resumeDocxData');
-    const name = localStorage.getItem('resumeDocxName');
-    if (data && name) {
-      try {
-        const binaryStr = atob(data);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        setResumeDocxFile(new File([bytes], name, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
-      } catch {
-        localStorage.removeItem('resumeDocxData');
-        localStorage.removeItem('resumeDocxName');
-      }
-    }
-  }, []);
-
-  // Restore resume HTML into the contenteditable editor whenever the modal opens
-  useEffect(() => {
-    if (resumeModalOpen && resumeInputTab === 'paste') {
-      setTimeout(() => {
-        if (resumeEditorRef.current) resumeEditorRef.current.innerHTML = resumeText;
-      }, 0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumeModalOpen]);
-
-  useEffect(() => {
-    if (resumeInputTab === 'paste') {
-      setTimeout(() => {
-        if (resumeEditorRef.current) resumeEditorRef.current.innerHTML = resumeText;
-      }, 0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumeInputTab]);
 
   // Real-time listener: auto-update jobs when Firestore documents change
   useEffect(() => {
@@ -329,24 +284,6 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
     }
   };
 
-  const handleDocxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-    const arrayBuffer = await file.arrayBuffer();
-    const result = await mammoth.convertToHtml({ arrayBuffer });
-    setDocxPreviewHtml(result.value);
-    localStorage.setItem('docxPreviewHtml', result.value);
-    try {
-      const base64 = btoa(new Uint8Array(arrayBuffer).reduce((s, b) => s + String.fromCharCode(b), ''));
-      localStorage.setItem('resumeDocxData', base64);
-      localStorage.setItem('resumeDocxName', file.name);
-    } catch {
-      console.warn('Could not persist DOCX to localStorage (file may be too large)');
-    }
-    setResumeDocxFile(file);
-  };
-
   const handleTailorResume = (job: Job) => setTailorModalJob(job);
 
   const closeTailorModal = () => setTailorModalJob(null);
@@ -399,15 +336,6 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
     }
   };
 
-  const canTailorResume = (job: Job) => {
-    const hasResume = resumeInputTab === 'upload'
-      ? !!resumeDocxFile
-      : !!resumeText.replace(/<[^>]*>/g, '').trim();
-    return !!job.description &&
-      settings.aiProvider !== 'none' &&
-      !!settings.aiApiKey &&
-      hasResume;
-  };
 
   if (loading) return (
     <div className="jobs-loading">
@@ -561,31 +489,6 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
             ))}
           </div>
 
-          <div className="resume-sidebar-section">
-            <div className="resume-sidebar-header">
-              <h4 className="filter-heading">Resume</h4>
-              {(resumeInputTab === 'upload' ? !!resumeDocxFile : !!resumeText.replace(/<[^>]*>/g, '').trim()) && (
-                <span className={`resume-mode-badge${resumeInputTab === 'upload' ? ' upload' : ' paste'}`}>
-                  {resumeInputTab === 'upload' ? 'Upload' : 'Paste'}
-                </span>
-              )}
-            </div>
-            {resumeInputTab === 'upload'
-              ? resumeDocxFile && (
-                  <div className="resume-sidebar-file" title={resumeDocxFile.name}>📄 {resumeDocxFile.name}</div>
-                )
-              : resumeText.replace(/<[^>]*>/g, '').trim() && (
-                  <div className="resume-sidebar-file">✓ Resume added</div>
-                )
-            }
-            <button
-              className="resume-sidebar-btn"
-              onClick={() => setResumeModalOpen(true)}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-              {(resumeInputTab === 'upload' ? !!resumeDocxFile : !!resumeText.replace(/<[^>]*>/g, '').trim()) ? 'Edit Resume' : 'Add Resume'}
-            </button>
-          </div>
         </aside>
 
         {/* Job Results */}
@@ -768,15 +671,14 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points={expandedDescriptionId === job.id ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}/></svg>
                               Job Description
                             </button>
-                            {canTailorResume(job) && (
-                              <button
-                                className="tailor-resume-btn"
-                                onClick={() => handleTailorResume(job)}
-                                title="Tailor your resume to this job using AI"
-                              >
-                                ✨ Tailor Resume
-                              </button>
-                            )}
+                            <button
+                              className="tailor-resume-btn"
+                              onClick={() => handleTailorResume(job)}
+                              disabled={settings.aiProvider === 'none' || !settings.aiApiKey}
+                              title={settings.aiProvider === 'none' || !settings.aiApiKey ? 'Configure an AI provider in Settings to use this feature' : 'Tailor your resume to this job using AI'}
+                            >
+                              ✨ Tailor Resume
+                            </button>
                           </div>
                           {expandedDescriptionId === job.id && (
                             <div className="description-content" dangerouslySetInnerHTML={{ __html: job.description }} />
@@ -832,199 +734,9 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
         </div>
       )}
 
-      {resumeModalOpen && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setResumeModalOpen(false); }}>
-          <div className="modal-card resume-edit-modal">
-            <div className="modal-header">
-              <div className="modal-title">My Resume</div>
-              <button className="modal-close" onClick={() => setResumeModalOpen(false)}>&times;</button>
-            </div>
-
-            {/* Tab bar */}
-            <div className="resume-input-tabs">
-              <button
-                className={`resume-input-tab${resumeInputTab === 'upload' ? ' active' : ''}`}
-                onClick={() => { setResumeInputTab('upload'); localStorage.setItem('resumeMode', 'upload'); }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                Upload Resume
-              </button>
-              <button
-                className={`resume-input-tab${resumeInputTab === 'paste' ? ' active' : ''}`}
-                onClick={() => {
-                  setResumeInputTab('paste');
-                  localStorage.setItem('resumeMode', 'paste');
-                  setTimeout(() => resumeEditorRef.current?.focus(), 50);
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M17 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-                Paste Resume
-              </button>
-            </div>
-
-            {/* Upload tab */}
-            {resumeInputTab === 'upload' && (
-              <>
-                <div className="modal-body resume-edit-body">
-                  <input
-                    type="file"
-                    accept=".docx"
-                    ref={docxInputRef}
-                    style={{ display: 'none' }}
-                    onChange={handleDocxUpload}
-                  />
-                  {resumeDocxFile ? (
-                    <>
-                      <div className="resume-upload-header">
-                        <div className="resume-upload-header-info">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                          <span className="resume-upload-filename" title={resumeDocxFile.name}>{resumeDocxFile.name}</span>
-                        </div>
-                        <button className="resume-upload-change-btn" onClick={() => docxInputRef.current?.click()}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                          Change File
-                        </button>
-                      </div>
-                      <div
-                        className="resume-edit-editor resume-upload-preview"
-                        contentEditable={false}
-                        dangerouslySetInnerHTML={{ __html: docxPreviewHtml }}
-                      />
-                    </>
-                  ) : (
-                    <div
-                      className="resume-upload-zone"
-                      onClick={() => docxInputRef.current?.click()}
-                      onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
-                      onDragLeave={e => e.currentTarget.classList.remove('drag-over')}
-                      onDrop={e => {
-                        e.preventDefault();
-                        e.currentTarget.classList.remove('drag-over');
-                        const file = e.dataTransfer.files[0];
-                        if (file && file.name.endsWith('.docx')) {
-                          const dt = new DataTransfer();
-                          dt.items.add(file);
-                          if (docxInputRef.current) {
-                            docxInputRef.current.files = dt.files;
-                            docxInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
-                          }
-                        }
-                      }}
-                    >
-                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                      <span className="resume-upload-label">Click to upload or drag & drop</span>
-                      <span className="resume-upload-hint">.docx files only</span>
-                    </div>
-                  )}
-                </div>
-                <div className="modal-footer resume-edit-footer">
-                  <span />
-                  <div className="resume-edit-actions">
-                    {resumeDocxFile && (
-                      <button
-                        className="nav-btn nav-btn-outline resume-edit-clear"
-                        onClick={() => {
-                          setResumeDocxFile(null);
-                          setDocxPreviewHtml('');
-                          localStorage.removeItem('resumeDocxData');
-                          localStorage.removeItem('resumeDocxName');
-                          localStorage.removeItem('docxPreviewHtml');
-                          docxCacheRef.current.clear();
-                        }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                    <button className="nav-btn nav-btn-accent" onClick={() => setResumeModalOpen(false)}>Done</button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Paste tab */}
-            {resumeInputTab === 'paste' && (
-              <>
-                <div className="modal-body resume-edit-body">
-                  <div
-                    ref={resumeEditorRef}
-                    className="resume-edit-editor"
-                    contentEditable={true}
-                    suppressContentEditableWarning={true}
-                    spellCheck={false}
-                    data-placeholder="Paste your resume here (Ctrl+V from Word)..."
-                    onInput={() => {
-                      const el = resumeEditorRef.current;
-                      if (!el) return;
-                      if (!el.textContent?.trim()) el.innerHTML = '';
-                      const html = el.innerHTML;
-                      setResumeText(html);
-                      localStorage.setItem('resumeText', html);
-                      tailorCacheRef.current.clear();
-                    }}
-                    onPaste={e => {
-                      e.preventDefault();
-                      const html = e.clipboardData.getData('text/html');
-                      if (html) {
-                        const doc = new DOMParser().parseFromString(html, 'text/html');
-                        doc.querySelectorAll('p').forEach(p => {
-                          const cls = p.getAttribute('class') || '';
-                          const tag = /MsoHeading1|Heading1/i.test(cls) ? 'h2'
-                            : /MsoHeading[2-6]|Heading[2-6]/i.test(cls) ? 'h3'
-                            : null;
-                          if (tag) {
-                            const h = doc.createElement(tag);
-                            h.innerHTML = p.innerHTML;
-                            p.replaceWith(h);
-                          }
-                        });
-                        doc.querySelectorAll('*').forEach(el => {
-                          el.removeAttribute('style');
-                          el.removeAttribute('class');
-                          el.removeAttribute('lang');
-                          el.removeAttribute('id');
-                          Array.from(el.attributes)
-                            .filter(a => a.name.includes(':'))
-                            .forEach(a => el.removeAttribute(a.name));
-                        });
-                        doc.querySelectorAll('xml, script, style').forEach(el => el.remove());
-                        document.execCommand('insertHTML', false, doc.body.innerHTML);
-                      } else {
-                        document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
-                      }
-                    }}
-                  />
-                </div>
-                <div className="modal-footer resume-edit-footer">
-                  <span className="resume-edit-char-count">{resumeText.replace(/<[^>]*>/g, '').length.toLocaleString()} characters</span>
-                  <div className="resume-edit-actions">
-                    {resumeText.replace(/<[^>]*>/g, '').trim() && (
-                      <button
-                        className="nav-btn nav-btn-outline resume-edit-clear"
-                        onClick={() => {
-                          setResumeText('');
-                          localStorage.removeItem('resumeText');
-                          if (resumeEditorRef.current) resumeEditorRef.current.innerHTML = '';
-                          tailorCacheRef.current.clear();
-                        }}
-                      >
-                        Clear
-                      </button>
-                    )}
-                    <button className="nav-btn nav-btn-accent" onClick={() => setResumeModalOpen(false)}>Done</button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       {tailorModalJob && (
         <ResumeTailorWorkshop
           job={tailorModalJob}
-          resumeText={resumeText}
-          resumeDocxFile={resumeDocxFile}
-          resumeInputTab={resumeInputTab}
           settings={settings}
           onClose={closeTailorModal}
         />
