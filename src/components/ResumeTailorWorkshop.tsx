@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, ExternalHyperlink } from 'docx';
 import type { Job } from '../types';
@@ -128,7 +128,16 @@ const SECTION_DEFS: { key: string; label: string; icon: React.ReactNode }[] = [
   )},
 ];
 
+const getThemeSnapshot = () => document.documentElement.dataset.theme ?? 'dark';
+const subscribeTheme = (cb: () => void) => {
+  const obs = new MutationObserver(cb);
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  return () => obs.disconnect();
+};
+
 export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeInputTab, settings, onClose }: Props) {
+  const currentTheme = useSyncExternalStore(subscribeTheme, getThemeSnapshot);
+  const isDark = currentTheme === 'dark';
   type Phase = 'extracting' | 'analyzing' | 'review';
   const [phase, setPhase] = useState<Phase>('analyzing');
   const [plainResume, setPlainResume] = useState('');
@@ -520,27 +529,43 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
       }
     }
 
-    const empty = `<p style="color:#4a527a;font-style:italic;text-align:center;padding:2rem 0">Your tailored resume will appear here as you make selections.</p>`;
+    const empty = `<p style="color:${isDark ? '#4a527a' : '#9ca3af'};font-style:italic;text-align:center;padding:2rem 0">Your tailored resume will appear here as you make selections.</p>`;
+
+    const t = isDark ? {
+      bodyBg: '#06090E', bodyColor: '#c5cee8',
+      paperBg: '#0C1118', paperBorder: '#1A2330',
+      name: '#f0f2fa', contact: '#7b85a8',
+      section: '#818cf8', sectionBorder: '#1A2330',
+      text: '#c5cee8', title: '#f0f2fa', meta: '#7b85a8',
+      skillLabel: '#c5cee8',
+    } : {
+      bodyBg: '#f3f5fb', bodyColor: '#374151',
+      paperBg: '#ffffff', paperBorder: '#dde2ee',
+      name: '#111827', contact: '#6b7280',
+      section: '#533ab6', sectionBorder: '#dde2ee',
+      text: '#374151', title: '#111827', meta: '#6b7280',
+      skillLabel: '#374151',
+    };
 
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',system-ui,sans-serif;font-size:11px;line-height:1.6;color:#c5cee8;background:#06090E;padding:14px}
-.paper{background:#0C1118;border:1px solid #1A2330;border-radius:10px;padding:22px 26px;min-height:calc(100vh - 28px)}
-.r-name{font-size:21px;font-weight:800;color:#f0f2fa;letter-spacing:-0.02em;margin-bottom:3px}
-.r-contact{font-size:10px;color:#7b85a8;margin-bottom:16px}
-.r-section{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#818cf8;border-bottom:1px solid #1A2330;margin:14px 0 7px;padding-bottom:3px}
-p{margin-bottom:5px;font-size:11px;color:#c5cee8}
+body{font-family:'Segoe UI',system-ui,sans-serif;font-size:13px;line-height:1.4;color:${t.bodyColor};background:${t.bodyBg};padding:14px}
+.paper{background:${t.paperBg};border:1px solid ${t.paperBorder};border-radius:10px;padding:22px 26px;min-height:calc(100vh - 28px)}
+.r-name{font-size:24px;font-weight:800;color:${t.name};letter-spacing:-0.02em;margin-bottom:3px}
+.r-contact{font-size:12px;color:${t.contact};margin-bottom:16px}
+.r-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:${t.section};border-bottom:1px solid ${t.sectionBorder};margin:14px 0 7px;padding-bottom:3px}
+p{margin-bottom:5px;font-size:13px;color:${t.text}}
 ul{margin:3px 0 5px 15px}
-li{margin-bottom:3px;font-size:11px;color:#c5cee8}
+li{margin-bottom:3px;font-size:13px;color:${t.text}}
 .exp-block{margin-bottom:10px}
 .exp-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1px}
-.exp-title{font-weight:700;font-size:11px;color:#f0f2fa}
-.exp-period{font-size:10px;color:#7b85a8;font-style:italic;white-space:nowrap;margin-left:8px}
-.exp-meta{font-size:10px;color:#7b85a8;margin-bottom:4px}
-.skill-cat-label{font-size:10px;font-weight:700;color:#c5cee8}
-.skill-chip{font-size:10px;padding:2px 9px;border-radius:20px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc}
+.exp-title{font-weight:700;font-size:13px;color:${t.title}}
+.exp-period{font-size:12px;color:${t.meta};font-style:italic;white-space:nowrap;margin-left:8px}
+.exp-meta{font-size:12px;color:${t.meta};margin-bottom:4px}
+.skill-cat-label{font-size:12px;font-weight:700;color:${t.skillLabel}}
+.skill-chip{font-size:12px;padding:2px 9px;border-radius:20px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc}
 </style></head><body><div class="paper">${content || empty}</div></body></html>`;
-  }, [analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder]);
+  }, [analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder, isDark]);
 
   // Write preview HTML imperatively so the iframe doesn't reload and lose scroll position
   useEffect(() => {
