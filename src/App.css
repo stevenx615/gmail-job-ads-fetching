@@ -1606,4 +1606,68 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
   overflow-y: auto;
 }
 
+/* ── Wizard steps ──────────────────────────────────────────── */
+.wz-step { display: flex; flex-direction: column; gap: 1rem; padding: 1.5rem 2rem; max-width: 640px; margin: 0 auto; }
+.wz-header { display: flex; flex-direction: column; gap: 0.2rem; }
+.wz-title { font-size: 1.1rem; font-weight: 700; color: var(--text-dark); }
+.wz-subtitle { font-size: 0.78rem; color: var(--text-mid); }
+.wz-progress { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 0.25rem; }
+.wz-progress-dot { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+.wz-progress-dot.done { background: #16a34a; color: #fff; }
+.wz-progress-dot.active { background: #6366f1; color: #fff; }
+.wz-progress-dot.pending { background: var(--input-bg); border: 1.5px solid var(--card-border); color: var(--text-mid); }
+.wz-progress-label { font-size: 9px; color: var(--text-mid); margin: 0 2px; }
+.wz-progress-label.active { color: #a5b4fc; font-weight: 600; }
+.wz-progress-line { width: 24px; height: 1.5px; background: var(--card-border); margin: 0 2px; }
+.wz-progress-line.done { background: #16a34a; }
+.wz-progress-line.active { background: #6366f1; }
+.wz-jd-textarea { width: 100%; min-height: 160px; resize: vertical; background: var(--input-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 0.75rem; color: var(--text-dark); font-size: 0.85rem; line-height: 1.5; font-family: inherit; box-sizing: border-box; }
+.wz-jd-textarea:focus { outline: none; border-color: #6366f1; }
+.wz-warning { display: flex; align-items: center; gap: 0.5rem; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); border-radius: 7px; padding: 0.5rem 0.75rem; font-size: 0.8rem; color: #fbbf24; flex-wrap: wrap; }
+.wz-skip-btn { background: none; border: none; color: #6366f1; font-size: 0.8rem; cursor: pointer; padding: 0; margin-left: auto; white-space: nowrap; }
+.wz-skip-btn:hover { text-decoration: underline; }
+.wz-footer { display: flex; justify-content: flex-end; padding-top: 0.5rem; }
+.wz-footer-split { justify-content: space-between; align-items: center; }
+.wz-back-btn { background: none; border: none; color: var(--text-mid); font-size: 0.85rem; cursor: pointer; padding: 0; }
+.wz-back-btn:hover { color: var(--text-dark); }
+.wz-resume-options { display: flex; gap: 1rem; }
+.wz-resume-card { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 1.5rem 1rem; border-radius: 10px; cursor: pointer; text-align: center; transition: border-color 0.15s, background 0.15s; }
+.wz-upload-card { background: rgba(22,163,74,0.05); border: 2px dashed rgba(22,163,74,0.4); }
+.wz-upload-card:hover { background: rgba(22,163,74,0.09); border-color: rgba(22,163,74,0.7); }
+.wz-scratch-card { background: rgba(99,102,241,0.05); border: 2px solid rgba(99,102,241,0.25); }
+.wz-scratch-card:hover { background: rgba(99,102,241,0.09); border-color: rgba(99,102,241,0.5); }
+.wz-card-icon { font-size: 1.75rem; }
+.wz-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text-dark); }
+.wz-card-desc { font-size: 0.78rem; color: var(--text-mid); }
+.wz-filename { font-size: 0.75rem; color: #4ade80; background: rgba(22,163,74,0.1); border-radius: 4px; padding: 0.2rem 0.5rem; word-break: break-all; }
+.wz-scratch-sub { font-size: 0.75rem; color: var(--text-mid); text-align: center; padding: 0.25rem 0; }
+.wz-scratch-form { display: flex; flex-direction: column; gap: 0.65rem; }
+.wz-form-row { display: flex; gap: 0.65rem; }
+.wz-form-row .wz-field { flex: 1; }
+.wz-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.wz-field label { font-size: 0.72rem; font-weight: 600; color: var(--text-mid); text-transform: uppercase; letter-spacing: 0.04em; }
+.wz-field input, .wz-field textarea { background: var(--input-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 0.45rem 0.65rem; color: var(--text-dark); font-size: 0.83rem; font-family: inherit; box-sizing: border-box; width: 100%; }
+.wz-field input:focus, .wz-field textarea:focus { outline: none; border-color: #6366f1; }
+.wz-field textarea { min-height: 80px; resize: vertical; line-height: 1.45; }
+.wz-exp-block { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.wz-add-link { background: none; border: none; color: #6366f1; font-size: 0.82rem; cursor: pointer; padding: 0; text-align: left; }
+.wz-add-link:hover { text-decoration: underline; }
+.wz-analyzing { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; padding: 2rem 1rem; text-align: center; }
+.wz-analyzing-title { font-size: 1rem; font-weight: 600; color: var(--text-dark); }
+.wz-analyzing-sub { font-size: 0.8rem; color: var(--text-mid); margin-top: -0.75rem; }
+.wz-analyzing-list { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; max-width: 280px; }
+.wz-analyzing-row { display: flex; align-items: center; gap: 0.6rem; }
+.wz-analyzing-dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; }
+.wz-analyzing-dot.done { background: #16a34a; color: #fff; }
+.wz-analyzing-dot.active { background: #6366f1; }
+.wz-analyzing-dot.pending { background: var(--input-bg); border: 1.5px solid var(--card-border); }
+.wz-analyzing-bar-wrap { flex: 1; background: var(--input-bg); border-radius: 3px; height: 4px; overflow: hidden; }
+.wz-analyzing-bar { height: 100%; border-radius: 3px; background: #6366f1; transition: width 0.4s ease; }
+.wz-analyzing-label { font-size: 0.8rem; color: var(--text-mid); flex: 1; text-align: left; }
+.wz-analyzing-label.active { color: #a5b4fc; }
+.wz-error { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); border-radius: 7px; padding: 0.75rem 1rem; color: #f87171; font-size: 0.85rem; display: flex; align-items: center; gap: 0.75rem; }
+.wz-retry-btn { background: none; border: 1px solid rgba(239,68,68,0.4); border-radius: 5px; color: #f87171; font-size: 0.78rem; padding: 0.25rem 0.65rem; cursor: pointer; white-space: nowrap; }
+.wz-retry-btn:hover { background: rgba(239,68,68,0.1); }
+.wz-change-resume { background: none; border: none; color: var(--text-mid); font-size: 0.78rem; cursor: pointer; padding: 0; }
+.wz-change-resume:hover { color: var(--text-dark); text-decoration: underline; }
 
