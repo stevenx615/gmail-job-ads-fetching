@@ -6,6 +6,7 @@ import { Dashboard } from './components/Dashboard';
 import { ApplicationsView } from './components/PipelineView';
 import { Settings } from './components/Settings';
 import { ParserDebugModal } from './components/ParserDebugModal';
+import { ResumeTailorWorkshop, STANDALONE_JOB } from './components/ResumeTailorWorkshop';
 import { getSettings } from './services/settingsService';
 import { getAllJobs } from './services/jobService';
 import { useGmailAuth } from './hooks/useGmailAuth';
@@ -17,6 +18,7 @@ function AppContent() {
   const [showDebug, setShowDebug] = useState(false);
   const [showApplications, setShowApplications] = useState(false);
   const [applicationsCount, setApplicationsCount] = useState(0);
+  const [showWorkshop, setShowWorkshop] = useState(false);
   const { isSignedIn } = useGmailAuth();
 
   // Apply theme to <html> element
@@ -98,6 +100,13 @@ function AppContent() {
             )}
             <GmailConnectButton />
             <button
+              className="nav-btn nav-btn-outline"
+              onClick={() => setShowWorkshop(true)}
+              title="Open Resume Workshop"
+            >
+              Workshop
+            </button>
+            <button
               className={`nav-btn nav-btn-applications${showApplications ? ' active' : ''}`}
               onClick={() => setShowApplications(true)}
             >
@@ -154,6 +163,15 @@ function AppContent() {
       {/* Parser Debug Modal */}
       {showDebug && (
         <ParserDebugModal onClose={() => setShowDebug(false)} />
+      )}
+
+      {/* Standalone Workshop */}
+      {showWorkshop && (
+        <ResumeTailorWorkshop
+          job={STANDALONE_JOB}
+          settings={getSettings()}
+          onClose={() => setShowWorkshop(false)}
+        />
       )}
     </div>
   );
