@@ -5,15 +5,34 @@ import type { Job } from '../types';
 import type { AppSettings } from '../types/settings';
 import type { TailorAnalysis, TailorQualification, TailorExperience, TailorSkill, TailorEducation, CustomSection, CustomSectionEntry } from '../types/ai';
 import { analyzeTailorSections, regenerateBullet, regenerateQualification, suggestBullet } from '../services/aiService';
+import { WizardStepJD } from './workshop/WizardStepJD';
+import { WizardStepResume } from './workshop/WizardStepResume';
+import { WizardStepScratch } from './workshop/WizardStepScratch';
+import type { WizardStep, ScratchResume } from './workshop/wizardTypes';
+import { assembleResumeText } from './workshop/wizardTypes';
 
 interface Props {
   job: Job;
-  resumeText: string;
-  resumeDocxFile: File | null;
-  resumeInputTab: 'upload' | 'paste';
   settings: AppSettings;
   onClose: () => void;
 }
+
+export const STANDALONE_JOB: Job = {
+  id: 'standalone',
+  title: '',
+  company: '',
+  location: '',
+  url: '',
+  source: 'manual',
+  type: '',
+  tags: [],
+  emailId: '',
+  dateReceived: '',
+  saved: false,
+  applied: false,
+  description: '',
+  createdAt: null,
+};
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -135,9 +154,19 @@ const subscribeTheme = (cb: () => void) => {
   return () => obs.disconnect();
 };
 
-export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeInputTab, settings, onClose }: Props) {
+export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   const currentTheme = useSyncExternalStore(subscribeTheme, getThemeSnapshot);
   const isDark = currentTheme === 'dark';
+  const isStandalone = job.id === 'standalone';
+  const [wizardStep, setWizardStep] = useState<WizardStep>(() => {
+    if (isStandalone) return 'jd';
+    const saved = loadTailorState(job.id);
+    return saved?.analysis && isSaveCompatible(saved) ? 'workshop' : 'jd';
+  });
+  const [localJobDescription, setLocalJobDescription] = useState(
+    job.description ? job.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+  );
+  const [wizardDocxFile, setWizardDocxFile] = useState<File | null>(null);
   type Phase = 'extracting' | 'analyzing' | 'review';
   const [phase, setPhase] = useState<Phase>('analyzing');
   const [plainResume, setPlainResume] = useState('');
@@ -209,72 +238,70 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
     setBuildDone(false);
   };
 
-  const runAnalysis = useCallback(async (resume: string) => {
+  const runAnalysis = useCallback(async (resume: string, jobDesc: string) => {
     setPhase('analyzing');
     setError(null);
     setBuildDone(false);
-    const jobDesc = job.description ? stripHtml(job.description) : `${job.title} at ${job.company}`;
-    const result = await analyzeTailorSections(resume, jobDesc, job.title, job.company, settings);
+    const desc = jobDesc.trim() || `${job.title} at ${job.company}`;
+    const result = await analyzeTailorSections(resume, desc, job.title, job.company, settings);
     if (result.error || !result.analysis) { setError(result.error || 'Analysis failed'); return; }
     applyAnalysis(result.analysis);
   }, [job, settings]);
 
+  // Restore saved state when opening directly into workshop
   useEffect(() => {
-    const init = async () => {
-      // Read from resume first; restore from save only if save is current-format compatible
-      const saved = loadTailorState(job.id);
-      if (saved?.analysis && isSaveCompatible(saved)) {
-        setAnalysis(saved.analysis);
-        setSummary(saved.summary);
-        setQualifications(saved.qualifications);
-        setQualifOverrides(saved.qualifOverrides);
-        setExperience(saved.experience);
-        setBulletModes(saved.bulletModes);
-        setSkills(saved.skills);
-        setEducation((saved.education as (TailorEducation & { include: boolean } | { text: string; include: boolean } | string)[]).map(e => {
-          if (typeof e === 'string') return { program: e, school: '', location: '', startDate: '', endDate: '', include: true };
-          if ('text' in e) return { program: (e as { text: string; include: boolean }).text, school: '', location: '', startDate: '', endDate: '', include: (e as { include: boolean }).include };
-          return e as TailorEducation & { include: boolean };
-        }));
-        if (Array.isArray(saved.customSections)) setCustomSections(saved.customSections as CustomSection[]);
-        if (saved.showSummarySection !== undefined) setShowSummarySection(saved.showSummarySection);
-        if (saved.showRequirementsSection !== undefined) setShowRequirementsSection(saved.showRequirementsSection);
-        if (saved.showSkillsSection !== undefined) setShowSkillsSection(saved.showSkillsSection);
-        if (saved.personalInfo) setPersonalInfo(saved.personalInfo);
-        if (saved.personalInclude) setPersonalInclude(saved.personalInclude);
-        if (saved.personalFieldOrder) setPersonalFieldOrder(saved.personalFieldOrder);
-        if (Array.isArray(saved.skillCategoryOrder)) setSkillCategoryOrder(saved.skillCategoryOrder as string[]);
-        else setSkillCategoryOrder(initSkillCategoryOrder(saved.skills ?? []));
-        setPhase('review');
-        setRestored(true);
-        // Also extract plain resume for potential re-analysis
-        if (resumeInputTab === 'paste') {
-          setPlainResume(stripHtml(resumeText));
-        } else if (resumeDocxFile) {
-          try {
-            const ab = await resumeDocxFile.arrayBuffer();
-            setPlainResume((await mammoth.extractRawText({ arrayBuffer: ab })).value);
-          } catch {}
-        }
-        return;
-      }
-      // No saved state — run fresh analysis
-      if (resumeInputTab === 'paste') {
-        const plain = stripHtml(resumeText);
-        setPlainResume(plain);
-        await runAnalysis(plain);
-      } else if (resumeDocxFile) {
+    if (wizardStep !== 'workshop') return;
+    const saved = loadTailorState(job.id);
+    if (!saved?.analysis || !isSaveCompatible(saved)) return;
+    setAnalysis(saved.analysis);
+    setSummary(saved.summary);
+    setQualifications(saved.qualifications);
+    setQualifOverrides(saved.qualifOverrides);
+    setExperience(saved.experience);
+    setBulletModes(saved.bulletModes);
+    setSkills(saved.skills);
+    setEducation((saved.education as (TailorEducation & { include: boolean } | { text: string; include: boolean } | string)[]).map(e => {
+      if (typeof e === 'string') return { program: e, school: '', location: '', startDate: '', endDate: '', include: true };
+      if ('text' in e) return { program: (e as { text: string; include: boolean }).text, school: '', location: '', startDate: '', endDate: '', include: (e as { include: boolean }).include };
+      return e as TailorEducation & { include: boolean };
+    }));
+    if (Array.isArray(saved.customSections)) setCustomSections(saved.customSections as CustomSection[]);
+    if (saved.showSummarySection !== undefined) setShowSummarySection(saved.showSummarySection);
+    if (saved.showRequirementsSection !== undefined) setShowRequirementsSection(saved.showRequirementsSection);
+    if (saved.showSkillsSection !== undefined) setShowSkillsSection(saved.showSkillsSection);
+    if (saved.personalInfo) setPersonalInfo(saved.personalInfo);
+    if (saved.personalInclude) setPersonalInclude(saved.personalInclude);
+    if (saved.personalFieldOrder) setPersonalFieldOrder(saved.personalFieldOrder);
+    if (Array.isArray(saved.skillCategoryOrder)) setSkillCategoryOrder(saved.skillCategoryOrder as string[]);
+    else setSkillCategoryOrder(initSkillCategoryOrder(saved.skills ?? []));
+    setPhase('review');
+    setRestored(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Run analysis when wizard reaches 'analyzing' step
+  useEffect(() => {
+    if (wizardStep !== 'analyzing') return;
+    const run = async () => {
+      let plain = '';
+      if (wizardDocxFile) {
         setPhase('extracting');
         try {
-          const ab = await resumeDocxFile.arrayBuffer();
-          const plain = (await mammoth.extractRawText({ arrayBuffer: ab })).value;
-          setPlainResume(plain);
-          await runAnalysis(plain);
-        } catch { setError('Could not extract text from DOCX file.'); }
+          const ab = await wizardDocxFile.arrayBuffer();
+          plain = (await mammoth.extractRawText({ arrayBuffer: ab })).value;
+        } catch {
+          setError('Could not extract text from DOCX file.');
+          setWizardStep('resume');
+          return;
+        }
+      } else {
+        plain = plainResume;
       }
+      setPlainResume(plain);
+      await runAnalysis(plain, localJobDescription);
+      setWizardStep('workshop');
     };
-    init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    run();
+  }, [wizardStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-save whenever user edits any section
   useEffect(() => {
@@ -293,7 +320,29 @@ export function ResumeTailorWorkshop({ job, resumeText, resumeDocxFile, resumeIn
     return () => document.removeEventListener('mousedown', handler);
   }, [showAddMenu]);
 
-  const reanalyze = () => { setRestored(false); runAnalysis(plainResume); };
+  const reanalyze = () => { setRestored(false); runAnalysis(plainResume, localJobDescription); };
+
+  function handleWizardJDNext(jd: string) {
+    setLocalJobDescription(jd);
+    setWizardStep('resume');
+  }
+
+  function handleWizardUpload(file: File) {
+    setWizardDocxFile(file);
+    setWizardStep('analyzing');
+  }
+
+  function handleScratchComplete(scratch: ScratchResume) {
+    setPlainResume(assembleResumeText(scratch));
+    setWizardStep('analyzing');
+  }
+
+  function handleChangeResume() {
+    localStorage.removeItem(storageKey(job.id));
+    setWizardDocxFile(null);
+    setPlainResume('');
+    setWizardStep('resume');
+  }
 
   const getBulletMode = (ei: number, bi: number): BulletMode => bulletModes[`${ei}-${bi}`] ?? 'tailored';
   const toggleBulletMode = (ei: number, bi: number) =>
@@ -782,6 +831,98 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   const isLoading = phase === 'extracting' || phase === 'analyzing';
 
+  if (wizardStep === 'jd') {
+    return (
+      <div className="modal-overlay">
+        <div className="modal-card" style={{ maxWidth: 680, width: '90vw' }}>
+          <div className="modal-header">
+            <div className="modal-title">Resume Tailor Workshop</div>
+            <button className="modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <WizardStepJD
+            jobTitle={job.title ?? ''}
+            jobCompany={job.company ?? ''}
+            initialJD={localJobDescription}
+            onNext={handleWizardJDNext}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (wizardStep === 'resume') {
+    return (
+      <div className="modal-overlay">
+        <div className="modal-card" style={{ maxWidth: 680, width: '90vw' }}>
+          <div className="modal-header">
+            <div className="modal-title">Resume Tailor Workshop</div>
+            <button className="modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <WizardStepResume
+            onUpload={handleWizardUpload}
+            onScratch={() => setWizardStep('scratch')}
+            onBack={() => setWizardStep('jd')}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (wizardStep === 'scratch') {
+    return (
+      <div className="modal-overlay">
+        <div className="modal-card" style={{ maxWidth: 680, width: '90vw' }}>
+          <div className="modal-header">
+            <div className="modal-title">Resume Tailor Workshop</div>
+            <button className="modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <WizardStepScratch
+            onComplete={handleScratchComplete}
+            onBack={() => setWizardStep('resume')}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (wizardStep === 'analyzing') {
+    return (
+      <div className="modal-overlay">
+        <div className="modal-card" style={{ maxWidth: 480, width: '90vw' }}>
+          <div className="modal-header">
+            <div className="modal-title">Resume Tailor Workshop</div>
+            <button className="modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <div className="wz-analyzing">
+            <div className="wz-title">Analyzing your resume</div>
+            <div className="wz-analyzing-sub">This takes about 10–20 seconds</div>
+            {error ? (
+              <div className="wz-error">
+                <span>{error}</span>
+                <button className="wz-retry-btn" onClick={() => { setError(null); setWizardStep('resume'); }}>← Back</button>
+              </div>
+            ) : (
+              <div className="wz-analyzing-list">
+                {['Extracting resume content', 'Matching requirements', 'Tailoring experience', 'Reviewing skills & education'].map((label, i) => {
+                  const isDone = phase === 'review' || (phase === 'analyzing' && i === 0);
+                  const isActive = phase === 'extracting' && i === 0;
+                  return (
+                    <div key={label} className="wz-analyzing-row">
+                      <div className={`wz-analyzing-dot ${isDone ? 'done' : isActive ? 'active' : 'pending'}`}>
+                        {isDone ? '✓' : ''}
+                      </div>
+                      <span className={`wz-analyzing-label ${isActive ? 'active' : ''}`}>{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="modal-overlay">
       <div className="modal-card workshop-modal">
@@ -804,6 +945,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               </span>
             </div>
           )}
+          <button className="wz-change-resume" onClick={handleChangeResume} title="Change resume">← Change Resume</button>
           <button className="modal-close" onClick={onClose} disabled={isLoading}>&times;</button>
         </div>
 
