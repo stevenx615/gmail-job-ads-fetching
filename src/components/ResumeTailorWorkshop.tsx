@@ -10,6 +10,7 @@ import { WizardStepResume } from './workshop/WizardStepResume';
 import { WizardStepScratch } from './workshop/WizardStepScratch';
 import type { WizardStep, ScratchResume } from './workshop/wizardTypes';
 import { assembleResumeText } from './workshop/wizardTypes';
+import { saveResume } from './workshop/resumeStorage';
 
 interface Props {
   job: Job;
@@ -49,6 +50,20 @@ function loadTailorState(jobId: string) {
 
 function saveTailorState(jobId: string, data: object) {
   try { localStorage.setItem(storageKey(jobId), JSON.stringify(data)); } catch {}
+}
+
+const navKey = (jobId: string) => `wz_nav_${jobId}`;
+function loadNavState(jobId: string): { step: WizardStep; jd: string } | null {
+  try {
+    const raw = localStorage.getItem(navKey(jobId));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveNavState(jobId: string, step: WizardStep, jd: string) {
+  try {
+    if (step === 'workshop') { localStorage.removeItem(navKey(jobId)); return; }
+    localStorage.setItem(navKey(jobId), JSON.stringify({ step, jd }));
+  } catch {}
 }
 
 // Returns false if the save is missing fields added in recent schema updates,
@@ -159,16 +174,22 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   const isDark = currentTheme === 'dark';
   const isStandalone = job.id === 'standalone';
   const [wizardStep, setWizardStep] = useState<WizardStep>(() => {
-    if (isStandalone) return 'jd';
+    const nav = loadNavState(job.id);
+    if (nav?.step && nav.step !== 'analyzing') return nav.step;
     const saved = loadTailorState(job.id);
     return saved?.analysis && isSaveCompatible(saved) ? 'workshop' : 'jd';
   });
-  const [localJobDescription, setLocalJobDescription] = useState(
-    job.description ? job.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : ''
-  );
+  const [navDir, setNavDir] = useState<'forward' | 'backward'>('forward');
+  const [localJobDescription, setLocalJobDescription] = useState(() => {
+    const nav = loadNavState(job.id);
+    if (nav?.jd) return nav.jd;
+    return job.description ? job.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+  });
   const [wizardDocxFile, setWizardDocxFile] = useState<File | null>(null);
   type Phase = 'extracting' | 'analyzing' | 'review';
   const [phase, setPhase] = useState<Phase>('analyzing');
+  const [analyzingStep, setAnalyzingStep] = useState(0);
+  const [analysisReady, setAnalysisReady] = useState(false);
   const [plainResume, setPlainResume] = useState('');
   const [analysis, setAnalysis] = useState<TailorAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -238,21 +259,20 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     setBuildDone(false);
   };
 
-  const runAnalysis = useCallback(async (resume: string, jobDesc: string) => {
+  const runAnalysis = useCallback(async (resume: string, jobDesc: string): Promise<boolean> => {
     setPhase('analyzing');
     setError(null);
     setBuildDone(false);
     const desc = jobDesc.trim() || `${job.title} at ${job.company}`;
     const result = await analyzeTailorSections(resume, desc, job.title, job.company, settings);
-    if (result.error || !result.analysis) { setError(result.error || 'Analysis failed'); return; }
+    if (result.error || !result.analysis) { setError(result.error || 'Analysis failed'); return false; }
     applyAnalysis(result.analysis);
+    return true;
   }, [job, settings]);
 
-  // Restore saved state when opening directly into workshop
-  useEffect(() => {
-    if (wizardStep !== 'workshop') return;
+  function restoreFromSaved(): boolean {
     const saved = loadTailorState(job.id);
-    if (!saved?.analysis || !isSaveCompatible(saved)) return;
+    if (!saved?.analysis || !isSaveCompatible(saved)) return false;
     setAnalysis(saved.analysis);
     setSummary(saved.summary);
     setQualifications(saved.qualifications);
@@ -276,12 +296,55 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     else setSkillCategoryOrder(initSkillCategoryOrder(saved.skills ?? []));
     setPhase('review');
     setRestored(true);
+    return true;
+  }
+
+  // Restore saved state when opening directly into workshop
+  useEffect(() => {
+    if (wizardStep !== 'workshop') return;
+    restoreFromSaved();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const hasExistingAnalysis = (() => {
+    const saved = loadTailorState(job.id);
+    return !!(saved?.analysis && isSaveCompatible(saved));
+  })();
 
   // Run analysis when wizard reaches 'analyzing' step
   useEffect(() => {
+    saveNavState(job.id, wizardStep, localJobDescription);
+  }, [wizardStep, localJobDescription]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Simulate step-by-step progress during analysis
+  useEffect(() => {
+    if (wizardStep !== 'analyzing') return;
+    if (phase === 'extracting') { setAnalyzingStep(0); return; }
+    if (phase === 'analyzing') {
+      setAnalyzingStep(1);
+      const d1 = 3000 + Math.random() * 3000;       // 3.0–6.0 s
+      const d2 = d1 + 2000 + Math.random() * 2500;  // +2.0–4.5 s
+      const d3 = d2 + 1500 + Math.random() * 2000;  // +1.5–3.5 s
+      const t1 = setTimeout(() => setAnalyzingStep(2), d1);
+      const t2 = setTimeout(() => setAnalyzingStep(3), d2);
+      const t3 = setTimeout(() => setAnalyzingStep(4), d3);
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+    // phase === 'review': API finished before animation completed — fast-forward to final step
+    setAnalyzingStep(4);
+  }, [phase, wizardStep]);
+
+  // Transition to workshop only after API done AND all steps shown
+  useEffect(() => {
+    if (analysisReady && analyzingStep >= 4) {
+      setAnalysisReady(false);
+      setWizardStep('workshop');
+    }
+  }, [analysisReady, analyzingStep]);
+
+  useEffect(() => {
     if (wizardStep !== 'analyzing') return;
     const run = async () => {
+      setAnalysisReady(false);
       let plain = '';
       if (wizardDocxFile) {
         setPhase('extracting');
@@ -297,8 +360,8 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
         plain = plainResume;
       }
       setPlainResume(plain);
-      await runAnalysis(plain, localJobDescription);
-      setWizardStep('workshop');
+      const ok = await runAnalysis(plain, localJobDescription);
+      if (ok) setAnalysisReady(true);
     };
     run();
   }, [wizardStep]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -324,6 +387,7 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
 
   function handleWizardJDNext(jd: string) {
     setLocalJobDescription(jd);
+    setNavDir('forward');
     setWizardStep('resume');
   }
 
@@ -333,16 +397,32 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   }
 
   function handleScratchComplete(scratch: ScratchResume) {
-    setPlainResume(assembleResumeText(scratch));
+    const text = assembleResumeText(scratch);
+    saveResume({ name: scratch.personal.name ? `${scratch.personal.name} (scratch)` : 'Scratch Resume', type: 'scratch', content: text, preview: text.slice(0, 150) });
+    setPlainResume(text);
     setWizardStep('analyzing');
   }
 
+  function handleSelectResume(content: string, resumeId?: string) {
+    if (resumeId) localStorage.setItem(`wz_resume_${job.id}`, resumeId);
+    setPlainResume(content);
+    setWizardStep('analyzing');
+  }
+
+  function handleGoToWorkshop(content: string, resumeId?: string) {
+    if (resumeId) localStorage.setItem(`wz_resume_${job.id}`, resumeId);
+    setPlainResume(content);
+    restoreFromSaved();
+    setWizardStep('workshop');
+  }
+
   function handleChangeResume() {
-    localStorage.removeItem(storageKey(job.id));
     setWizardDocxFile(null);
     setPlainResume('');
     setWizardStep('resume');
   }
+
+  const analyzedResumeId = localStorage.getItem(`wz_resume_${job.id}`);
 
   const getBulletMode = (ei: number, bi: number): BulletMode => bulletModes[`${ei}-${bi}`] ?? 'tailored';
   const toggleBulletMode = (ei: number, bi: number) =>
@@ -625,7 +705,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
     iframe.contentDocument?.write(previewHtml);
     iframe.contentDocument?.close();
     iframe.contentWindow?.scrollTo(0, scrollY);
-  }, [previewHtml]);
+  }, [previewHtml, wizardStep]); // wizardStep: re-run when iframe first mounts on transition to workshop
 
   const buildResume = async () => {
     if (!analysis) return;
@@ -833,10 +913,15 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   if (wizardStep === 'jd') {
     return (
-      <div className="modal-overlay">
-        <div className="modal-card" style={{ maxWidth: 680, width: '90vw' }}>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-card wz-modal-card" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
-            <div className="modal-title">Resume Tailor Workshop</div>
+            <div className="modal-title">
+              <svg className="wz-modal-title-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+              </svg>
+              Resume Tailor Workshop
+            </div>
             <button className="modal-close" onClick={onClose}>&times;</button>
           </div>
           <WizardStepJD
@@ -844,6 +929,9 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
             jobCompany={job.company ?? ''}
             initialJD={localJobDescription}
             onNext={handleWizardJDNext}
+            onBack={onClose}
+            onJDChange={setLocalJobDescription}
+            navDir={navDir}
           />
         </div>
       </div>
@@ -852,16 +940,25 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   if (wizardStep === 'resume') {
     return (
-      <div className="modal-overlay">
-        <div className="modal-card" style={{ maxWidth: 680, width: '90vw' }}>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-card wz-modal-card" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
-            <div className="modal-title">Resume Tailor Workshop</div>
+            <div className="modal-title">
+              <svg className="wz-modal-title-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+              </svg>
+              Resume Tailor Workshop
+            </div>
             <button className="modal-close" onClick={onClose}>&times;</button>
           </div>
           <WizardStepResume
             onUpload={handleWizardUpload}
             onScratch={() => setWizardStep('scratch')}
-            onBack={() => setWizardStep('jd')}
+            onBack={() => { setNavDir('backward'); setWizardStep('jd'); }}
+            onSelectResume={handleSelectResume}
+            hasExistingAnalysis={hasExistingAnalysis}
+            onGoToWorkshop={handleGoToWorkshop}
+            analyzedResumeId={analyzedResumeId}
           />
         </div>
       </div>
@@ -870,10 +967,15 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   if (wizardStep === 'scratch') {
     return (
-      <div className="modal-overlay">
-        <div className="modal-card" style={{ maxWidth: 680, width: '90vw' }}>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-card wz-modal-card" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
-            <div className="modal-title">Resume Tailor Workshop</div>
+            <div className="modal-title">
+              <svg className="wz-modal-title-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+              </svg>
+              Resume Tailor Workshop
+            </div>
             <button className="modal-close" onClick={onClose}>&times;</button>
           </div>
           <WizardStepScratch
@@ -887,34 +989,108 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   if (wizardStep === 'analyzing') {
     return (
-      <div className="modal-overlay">
-        <div className="modal-card" style={{ maxWidth: 480, width: '90vw' }}>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-card wz-modal-card" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
-            <div className="modal-title">Resume Tailor Workshop</div>
+            <div className="modal-title">
+              <svg className="wz-modal-title-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
+              </svg>
+              Resume Tailor Workshop
+            </div>
             <button className="modal-close" onClick={onClose}>&times;</button>
           </div>
-          <div className="wz-analyzing">
-            <div className="wz-title">Analyzing your resume</div>
-            <div className="wz-analyzing-sub">This takes about 10–20 seconds</div>
-            {error ? (
-              <div className="wz-error">
-                <span>{error}</span>
-                <button className="wz-retry-btn" onClick={() => { setError(null); setWizardStep('resume'); }}>← Back</button>
+          <div className="wz-step">
+            {/* Progress bar */}
+            <div className="wz-progress-bar">
+              <div className="wz-progress-step done">
+                <div className="wz-progress-dot">✓</div>
+                <span className="wz-progress-label">Job Description</span>
               </div>
-            ) : (
-              <div className="wz-analyzing-list">
-                {['Extracting resume content', 'Matching requirements', 'Tailoring experience', 'Reviewing skills & education'].map((label, i) => {
-                  const isDone = phase === 'review' || (phase === 'analyzing' && i === 0);
-                  const isActive = phase === 'extracting' && i === 0;
-                  return (
-                    <div key={label} className="wz-analyzing-row">
-                      <div className={`wz-analyzing-dot ${isDone ? 'done' : isActive ? 'active' : 'pending'}`}>
-                        {isDone ? '✓' : ''}
-                      </div>
-                      <span className={`wz-analyzing-label ${isActive ? 'active' : ''}`}>{label}</span>
+              <div className="wz-progress-line done" />
+              <div className="wz-progress-step done">
+                <div className="wz-progress-dot">✓</div>
+                <span className="wz-progress-label">Resume</span>
+              </div>
+              <div className="wz-progress-line done" />
+              <div className="wz-progress-step active">
+                <div className="wz-progress-dot">3</div>
+                <span className="wz-progress-label">Analyze</span>
+              </div>
+            </div>
+
+            {error ? (
+              <>
+                <div className="wz-analyze-error">
+                  <div className="wz-analyze-error-icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                  </div>
+                  <div className="wz-analyze-error-title">Analysis failed</div>
+                  <div className="wz-analyze-error-msg">{error}</div>
+                  <div className="wz-analyze-suggestions">
+                    <div className="wz-analyze-suggestion-item">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      <span>If you've hit a quota limit, wait a moment and try again, or switch to a different AI provider in Settings.</span>
                     </div>
-                  );
-                })}
+                    <div className="wz-analyze-suggestion-item">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                      <span>Double-check your API key is correct in Settings → AI Provider.</span>
+                    </div>
+                    <div className="wz-analyze-suggestion-item">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                      <span>Try trimming the resume or job description to reduce token usage.</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="wz-footer wz-footer-split">
+                  <button className="wz-back-btn" onClick={() => { setError(null); setWizardStep('resume'); }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    Back
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="wz-analyzing-body">
+                {/* Pulsing rings animation */}
+                <div className="wz-analyzing-hero">
+                  <div className="wz-ring wz-ring-3" />
+                  <div className="wz-ring wz-ring-2" />
+                  <div className="wz-ring wz-ring-1" />
+                  <div className="wz-analyzing-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+                      <line x1="20" y1="4" x2="8.12" y2="15.88"/>
+                      <line x1="14.47" y1="14.48" x2="20" y2="20"/>
+                      <line x1="8.12" y1="8.12" x2="12" y2="12"/>
+                    </svg>
+                  </div>
+                </div>
+
+                <div className="wz-analyzing-text">
+                  <div className="wz-title">{phase === 'extracting' ? 'Extracting resume content…' : 'Analyzing your resume…'}</div>
+                  <div className="wz-analyzing-sub">This takes about 10–20 seconds</div>
+                </div>
+
+                {/* Shimmer progress bar */}
+                <div className="wz-analyzing-bar"><div className="wz-analyzing-bar-fill" /></div>
+
+                {/* Step checklist */}
+                <div className="wz-analyzing-list">
+                  {['Extracting resume content', 'Matching requirements', 'Tailoring experience', 'Reviewing skills & education', 'Generating tailored content'].map((label, i) => {
+                    const isDone = phase === 'review' || i < analyzingStep;
+                    const isActive = wizardStep === 'analyzing' && i === analyzingStep;
+                    return (
+                      <div key={label} className="wz-analyzing-row">
+                        <div className={`wz-analyzing-dot ${isDone ? 'done' : isActive ? 'active' : 'pending'}`}>
+                          {isDone ? '✓' : isActive ? <span className="wz-dot-spinner" /> : ''}
+                        </div>
+                        <span className={`wz-analyzing-label${isDone ? ' done' : isActive ? ' active' : ''}`}>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -930,22 +1106,35 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
         {/* Header */}
         <div className="modal-header ws-modal-header">
           <div className="ws-header-left">
-            <div className="modal-title">Resume Workshop</div>
+            <div className="modal-title">
+              <svg className="ws-modal-title-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+                <line x1="20" y1="4" x2="8.12" y2="15.88"/>
+                <line x1="14.47" y1="14.48" x2="20" y2="20"/>
+                <line x1="8.12" y1="8.12" x2="12" y2="12"/>
+              </svg>
+              Resume Workshop
+              {restored && <span className="ws-restored-badge">Restored</span>}
+            </div>
             <div className="tailor-resume-subtitle">{job.title} · {job.company}</div>
           </div>
-          {restored && (
-            <span className="ws-restored-badge">Restored</span>
-          )}
+          <button className="wz-change-resume" onClick={handleChangeResume} title="Change resume">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+            </svg>
+            Change Resume
+          </button>
           {analysis && (
             <div className="ws-header-score">
-              <span className="ws-header-score-num" style={{ color: scoreColor(analysis.atsScore) }}>{analysis.atsScore}</span>
               <span className="ws-header-score-label">ATS Score</span>
-              <span className="ws-header-score-badge" style={{ background: scoreColor(analysis.atsScore) + '22', color: scoreColor(analysis.atsScore) }}>
+              <div className="ws-header-score-circle" style={{ borderColor: scoreColor(analysis.atsScore), color: scoreColor(analysis.atsScore) }}>
+                {analysis.atsScore}
+              </div>
+              <span className="ws-header-score-match" style={{ color: scoreColor(analysis.atsScore) }}>
                 {scoreLabel(analysis.atsScore)}
               </span>
             </div>
           )}
-          <button className="wz-change-resume" onClick={handleChangeResume} title="Change resume">← Change Resume</button>
           <button className="modal-close" onClick={onClose} disabled={isLoading}>&times;</button>
         </div>
 
@@ -1109,6 +1298,14 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                     rows={8}
                     placeholder="Your professional summary will appear here after analysis…"
                   />
+                  {analysis?.originalSummary && (
+                    <div className="ws-original-block">
+                      <div className="ws-original-block-header">
+                        <span className="ws-original-block-label">Original from resume</span>
+                      </div>
+                      <div className="ws-original-block-text">{analysis.originalSummary}</div>
+                    </div>
+                  )}
                 </div>
               </>}
 
@@ -1280,7 +1477,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                           <div key={ei} className={`ws-edu-card${exp.include === false ? ' excluded' : ''}`}>
                             <div className="ws-edu-card-header">
                               <span className="ws-edu-card-label">Entry {ei + 1}</span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <div className="ws-entry-actions">
                                 <button
                                   className="ws-edu-delete-btn"
                                   title="Delete entry"
@@ -1341,7 +1538,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                                          onClick={() => setBulletModes(prev => ({ ...prev, [key]: 'tailored' }))}>
                                       <span className="ws-version-badge ws-version-t" title="Tailored">T</span>
                                       {regeneratingBullets[key] ? (
-                                        <div className="ws-bullet-regen-msg" style={{ flex: 1 }}>
+                                        <div className="ws-bullet-regen-msg">
                                           <span className="badge-selector-ai-spinner" />Regenerating…
                                         </div>
                                       ) : (
@@ -1393,8 +1590,8 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                   <div>
                     <div className="ws-editor-section-title">Skills</div>
                     <div className="ws-editor-subtitle">Click to toggle · drag chips between categories · drag ⠿ to reorder</div>
-                    <div className="ws-editor-subtitle" style={{ marginTop: '0.2rem' }}>
-                      <span style={{ color: '#fbbf24', fontWeight: 600 }}>Yellow chips</span> are AI-suggested skills from the job post not found in your resume — include them if they apply to you
+                    <div className="ws-editor-subtitle ws-skills-subhint">
+                      <span className="ws-skills-subhint-keyword">Yellow chips</span> are AI-suggested skills from the job post not found in your resume — include them if they apply to you
                     </div>
                   </div>
                   <button
@@ -1552,7 +1749,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                         <div key={idx} className={`ws-edu-card${edu.include ? '' : ' excluded'}`}>
                           <div className="ws-edu-card-header">
                             <span className="ws-edu-card-label">Entry {idx + 1}</span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div className="ws-entry-actions">
                               <button
                                 className="ws-edu-delete-btn"
                                 title="Delete entry"
@@ -1615,7 +1812,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                         <div key={ei} className={`ws-edu-card${entry.include ? '' : ' excluded'}`}>
                           <div className="ws-edu-card-header">
                             <span className="ws-edu-card-label">Entry {ei + 1}</span>
-                            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                            <div className="ws-custom-entry-actions">
                               {sec.entries.length > 1 && <button className="ws-remove-sec-btn" title="Remove entry" onClick={() => setCustomSections(prev => prev.map(s => s.id !== sec.id ? s : { ...s, entries: s.entries.filter((_, j) => j !== ei) }))}>✕</button>}
                               <button className={`ws-toggle${entry.include ? ' on' : ''}`} onClick={() => setCustomSections(prev => prev.map(s => s.id !== sec.id ? s : { ...s, entries: s.entries.map((e, j) => j !== ei ? e : { ...e, include: !e.include }) }))} aria-label="Toggle entry"><span className="ws-toggle-thumb" /></button>
                             </div>
@@ -1680,13 +1877,15 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                 className="ws-preview-iframe"
                 title="Resume Preview"
                 sandbox="allow-same-origin"
-                style={{ display: previewTab === 'preview' ? 'block' : 'none' }}
+                className={`ws-preview-iframe${previewTab !== 'preview' ? ' ws-preview-iframe--hidden' : ''}`}
               />
               {previewTab === 'jd' && (
                 <div className="ws-jd-panel">
                   {job.description
                     ? <div className="ws-jd-text description-content" dangerouslySetInnerHTML={{ __html: job.description }} />
-                    : <div className="ws-empty">No job description available.</div>
+                    : localJobDescription
+                      ? <div className="ws-jd-text description-content">{localJobDescription}</div>
+                      : <div className="ws-empty">No job description available.</div>
                   }
                 </div>
               )}
@@ -1698,15 +1897,15 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
         {/* Footer */}
         <div className="modal-footer">
           {settings.aiProvider !== 'none' && (
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', opacity: 0.7, fontFamily: 'monospace', marginRight: 'auto' }}>
+            <span className="ws-footer-provider">
               {settings.aiProvider}/{settings.aiModel || '—'}
             </span>
           )}
           <button className="nav-btn nav-btn-outline" onClick={onClose} disabled={isLoading}>Close</button>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="ws-footer-actions">
             {!isLoading && error && <button className="nav-btn nav-btn-outline" onClick={reanalyze}>Retry</button>}
             {phase === 'review' && !isLoading && (
-              <button className="ws-reanalyze-btn" onClick={reanalyze} style={{ marginRight: '0.25rem' }}>↺ Re-analyze</button>
+              <button className="ws-reanalyze-btn" onClick={reanalyze}>↺ Re-analyze</button>
             )}
             {phase === 'review' && buildDone && <span className="workshop-done-msg">Downloaded!</span>}
             {phase === 'review' && (

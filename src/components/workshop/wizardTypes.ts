@@ -11,6 +11,8 @@ export interface ScratchPersonal {
   phone: string;
   linkedin: string;
   location: string;
+  github: string;
+  website: string;
 }
 
 export interface ScratchExperience {
@@ -45,7 +47,8 @@ export function assembleResumeText(s: ScratchResume): string {
   if (personal.name) lines.push(personal.name);
   const contact = [personal.email, personal.phone, personal.location].filter(Boolean);
   if (contact.length) lines.push(contact.join(' | '));
-  if (personal.linkedin) lines.push(personal.linkedin);
+  const links = [personal.linkedin, personal.github, personal.website].filter(Boolean);
+  if (links.length) lines.push(links.join(' | '));
 
   if (summary) lines.push('', 'SUMMARY', summary);
 

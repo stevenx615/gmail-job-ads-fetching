@@ -74,6 +74,7 @@ export interface TailorEducation {
 export interface TailorAnalysis {
   candidateName: string;
   contactInfo: string[];
+  originalSummary: string;
   summary: string;
   atsScore: number;
   matchedKeywords: string[];

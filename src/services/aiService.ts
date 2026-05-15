@@ -467,6 +467,7 @@ Return ONLY valid JSON (no markdown, no code fences, no explanation):
 {
   "candidateName": "Full name from resume header",
   "contactInfo": ["email@example.com", "555-123-4567", "City, State", "linkedin.com/in/handle"],
+  "originalSummary": "The exact professional summary or objective copied verbatim from the resume. Empty string if the resume has none.",
   "summary": "Professional summary written specifically for this role — maximum 3 sentences",
   "atsScore": 85,
   "matchedKeywords": ["keyword1", "keyword2"],
@@ -567,6 +568,7 @@ export async function analyzeTailorSections(
     const analysis: TailorAnalysis = {
       candidateName: String(parsed.candidateName || ''),
       contactInfo: Array.isArray(parsed.contactInfo) ? parsed.contactInfo.map(String).filter(Boolean) : [],
+      originalSummary: String(parsed.originalSummary || ''),
       summary: String(parsed.summary || ''),
       atsScore: typeof parsed.atsScore === 'number' ? Math.max(0, Math.min(100, parsed.atsScore)) : 0,
       matchedKeywords: Array.isArray(parsed.matchedKeywords) ? parsed.matchedKeywords.map(String) : [],
