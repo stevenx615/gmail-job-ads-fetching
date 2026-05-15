@@ -5,7 +5,6 @@ import { FetchEmailsPanel } from './components/gmail/FetchEmailsPanel';
 import { Dashboard } from './components/Dashboard';
 import { ApplicationsView } from './components/PipelineView';
 import { Settings } from './components/Settings';
-import { ParserDebugModal } from './components/ParserDebugModal';
 import { ResumeTailorWorkshop, STANDALONE_JOB } from './components/ResumeTailorWorkshop';
 import { getSettings } from './services/settingsService';
 import { getAllJobs } from './services/jobService';
@@ -15,11 +14,10 @@ import './App.css';
 function AppContent() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
   const [showApplications, setShowApplications] = useState(false);
   const [applicationsCount, setApplicationsCount] = useState(0);
   const [showWorkshop, setShowWorkshop] = useState(false);
-  const { isSignedIn } = useGmailAuth();
+  useGmailAuth(); // keeps GmailAuthContext warm for child components
 
   // Apply theme to <html> element
   useEffect(() => {
@@ -89,15 +87,6 @@ function AppContent() {
           </div>
           <div className="navbar-actions">
             <FetchEmailsPanel onFetchComplete={handleFetchComplete} />
-            {isSignedIn && (
-              <button
-                className="nav-btn nav-btn-outline"
-                onClick={() => setShowDebug(true)}
-                title="Parser Debugger"
-              >
-                Debug
-              </button>
-            )}
             <GmailConnectButton />
             <button
               className="nav-btn nav-btn-outline"
@@ -165,11 +154,6 @@ function AppContent() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Parser Debug Modal */}
-      {showDebug && (
-        <ParserDebugModal onClose={() => setShowDebug(false)} />
       )}
 
       {/* Standalone Workshop */}

@@ -24,6 +24,84 @@ let jobsCache: Job[] | null = null;
 // Stable order cache in localStorage
 const ORDER_CACHE_KEY = 'jobs_stable_order';
 
+// Persistent cache: survives page refresh, stored in IndexedDB (no size limit)
+const JOBS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+const IDB_NAME = 'job-board';
+const IDB_JOBS_STORE = 'cached-jobs';
+const IDB_META_STORE = 'meta';
+const IDB_VERSION = 2; // bump to wipe cache when schema changes
+
+type CachedJob = Omit<Job, 'createdAt'>;
+
+let _idbPromise: Promise<IDBDatabase> | null = null;
+
+function getIDB(): Promise<IDBDatabase> {
+  if (!_idbPromise) {
+    _idbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        // Drop and recreate stores on every version bump to wipe stale cache
+        if (db.objectStoreNames.contains(IDB_JOBS_STORE)) db.deleteObjectStore(IDB_JOBS_STORE);
+        if (db.objectStoreNames.contains(IDB_META_STORE)) db.deleteObjectStore(IDB_META_STORE);
+        db.createObjectStore(IDB_JOBS_STORE, { keyPath: 'id' });
+        db.createObjectStore(IDB_META_STORE);
+      };
+      req.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
+      req.onerror = () => { _idbPromise = null; reject(req.error); };
+    });
+  }
+  return _idbPromise;
+}
+
+async function loadPersistentCache(): Promise<CachedJob[] | null> {
+  try {
+    const db = await getIDB();
+    return await new Promise<CachedJob[] | null>((resolve) => {
+      const tx = db.transaction([IDB_JOBS_STORE, IDB_META_STORE], 'readonly');
+      const metaReq = tx.objectStore(IDB_META_STORE).get('cachedAt');
+      metaReq.onsuccess = () => {
+        const cachedAt = metaReq.result as number | undefined;
+        if (!cachedAt || Date.now() - cachedAt > JOBS_CACHE_TTL) { resolve(null); return; }
+        const jobsReq = tx.objectStore(IDB_JOBS_STORE).getAll();
+        jobsReq.onsuccess = () => resolve(jobsReq.result as CachedJob[]);
+        jobsReq.onerror = () => resolve(null);
+      };
+      metaReq.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function savePersistentCache(jobs: Job[]): Promise<void> {
+  try {
+    const db = await getIDB();
+    // Exclude createdAt (Date object — not JSON-serializable, not needed client-side)
+    const slim: CachedJob[] = jobs.map(({ createdAt: _c, ...rest }) => rest);
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([IDB_JOBS_STORE, IDB_META_STORE], 'readwrite');
+      tx.onerror = () => reject(tx.error);
+      tx.oncomplete = () => resolve();
+      const store = tx.objectStore(IDB_JOBS_STORE);
+      store.clear();
+      for (const job of slim) store.add(job);
+      tx.objectStore(IDB_META_STORE).put(Date.now(), 'cachedAt');
+    });
+  } catch (e) {
+    console.warn('[jobService] Failed to persist jobs cache:', e);
+  }
+}
+
+function clearPersistentCache(): void {
+  // Fire-and-forget: clears IDB before any subsequent page load can read it
+  getIDB().then(db => {
+    const tx = db.transaction([IDB_JOBS_STORE, IDB_META_STORE], 'readwrite');
+    tx.objectStore(IDB_JOBS_STORE).clear();
+    tx.objectStore(IDB_META_STORE).delete('cachedAt');
+  }).catch(() => { /* ignore */ });
+}
+
 function getStableOrder(): string[] {
   try {
     const stored = localStorage.getItem(ORDER_CACHE_KEY);
@@ -61,10 +139,21 @@ function applyStableOrder(jobs: Job[]): Job[] {
  * @returns Array of all jobs with normalized fields
  */
 export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
+  // 1. In-memory cache (fastest — same session)
   if (jobsCache && !forceRefresh) {
     return jobsCache;
   }
 
+  // 2. IndexedDB cache (fast — survives page refresh, no size limit)
+  if (!forceRefresh) {
+    const cached = await loadPersistentCache();
+    if (cached) {
+      jobsCache = cached as Job[]; // description is undefined, which is expected
+      return jobsCache;
+    }
+  }
+
+  // 3. Firestore fetch
   const jobsCollection = collection(db, COLLECTION_NAME);
   const q = query(jobsCollection, orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
@@ -98,13 +187,15 @@ export async function getAllJobs(forceRefresh = false): Promise<Job[]> {
   const stableOrder = getStableOrder();
 
   if (stableOrder.length === 0 || stableOrder.length !== fetchedJobs.length) {
-    // First time or job count changed - save the current Firestore order
     setStableOrder(fetchedJobs.map(j => j.id));
     jobsCache = fetchedJobs;
   } else {
-    // Apply the stable order
     jobsCache = applyStableOrder(fetchedJobs);
   }
+
+  // Persist to IndexedDB so next page load skips the Firestore round-trip
+  await savePersistentCache(jobsCache);
+
   return jobsCache;
 }
 
@@ -198,7 +289,7 @@ export async function fetchJobsWithDescriptions(): Promise<Map<string, string>> 
 
 export function invalidateJobsCache(): void {
   jobsCache = null;
-  // Clear stable order so new jobs get incorporated in the next fetch
+  clearPersistentCache();
   try {
     localStorage.removeItem(ORDER_CACHE_KEY);
   } catch (e) {
@@ -212,16 +303,17 @@ export async function addJob(jobData: NewJob): Promise<string> {
     ...jobData,
     createdAt: serverTimestamp(),
   });
+  clearPersistentCache();
   return docRef.id;
 }
 
 export async function deleteJob(id: string): Promise<void> {
   const jobDoc = doc(db, COLLECTION_NAME, id);
   await deleteDoc(jobDoc);
-  // Update cache in place instead of re-fetching
   if (jobsCache) {
     jobsCache = jobsCache.filter(j => j.id !== id);
   }
+  clearPersistentCache();
 }
 
 export async function toggleJobSaved(id: string, saved: boolean): Promise<void> {
@@ -230,6 +322,7 @@ export async function toggleJobSaved(id: string, saved: boolean): Promise<void> 
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === id ? { ...j, saved } : j);
   }
+  clearPersistentCache();
 }
 
 export async function toggleJobApplied(id: string, applied: boolean): Promise<void> {
@@ -247,6 +340,7 @@ export async function toggleJobApplied(id: string, applied: boolean): Promise<vo
         : j
     );
   }
+  clearPersistentCache();
 }
 
 export async function toggleJobReadStatus(jobId: string, read: boolean): Promise<void> {
@@ -255,6 +349,7 @@ export async function toggleJobReadStatus(jobId: string, read: boolean): Promise
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === jobId ? { ...j, read } : j);
   }
+  clearPersistentCache();
 }
 
 export async function updateJobBadges(id: string, badges: JobBadges): Promise<void> {
@@ -263,6 +358,7 @@ export async function updateJobBadges(id: string, badges: JobBadges): Promise<vo
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === id ? { ...j, badges } : j);
   }
+  clearPersistentCache();
 }
 
 // Bulk operations for settings page
@@ -285,6 +381,7 @@ export async function deleteReadJobs(): Promise<number> {
   if (jobsCache) {
     jobsCache = jobsCache.filter(j => !j.read);
   }
+  clearPersistentCache();
   return readJobs.length;
 }
 
@@ -297,6 +394,7 @@ export async function markAllJobsRead(): Promise<number> {
   if (jobsCache) {
     jobsCache = jobsCache.map(j => ({ ...j, read: true }));
   }
+  clearPersistentCache();
   return unreadJobs.length;
 }
 
@@ -386,6 +484,7 @@ export async function updateJobStage(id: string, stage: ApplicationStage, stageD
         : j
     );
   }
+  clearPersistentCache();
 }
 
 export async function removeFromApplications(id: string): Promise<void> {
@@ -402,6 +501,7 @@ export async function removeFromApplications(id: string): Promise<void> {
         : j
     );
   }
+  clearPersistentCache();
 }
 
 /**
@@ -422,4 +522,5 @@ export async function updateJobFields(
   if (jobsCache) {
     jobsCache = jobsCache.map(j => j.id === id ? { ...j, ...fields } : j);
   }
+  clearPersistentCache();
 }

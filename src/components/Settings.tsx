@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { getSettings, saveSettings, resetSettings } from '../services/settingsService';
 import { deleteAllJobs, deleteReadJobs, markAllJobsRead, exportJobs, getAllJobs, updateJobBadges } from '../services/jobService';
 import { testAIConnection, getDefaultModel, clearSuggestionCache } from '../services/aiService';
+import { useGmailAuth } from '../hooks/useGmailAuth';
+import { ParserDebugModal } from './ParserDebugModal';
 import type { AppSettings } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 
@@ -93,7 +95,6 @@ function TagListEditor({
 
 export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [hasChanges, setHasChanges] = useState(false);
   const [newBadge, setNewBadge] = useState('');
   const [customBadgeCategory, setCustomBadgeCategory] = useState<keyof AppSettings['customBadges']>('responsibilities');
   const [bulkActionStatus, setBulkActionStatus] = useState('');
@@ -103,37 +104,22 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
   const [aiTesting, setAiTesting] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai');
   const [useCustomModel, setUseCustomModel] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const { isSignedIn, signOut } = useGmailAuth();
 
   useEffect(() => {
     setSettings(getSettings());
   }, []);
 
   const handleChange = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
-    setHasChanges(true);
+    const updated = { ...settings, [key]: value };
+    setSettings(updated);
+    saveSettings(updated);
   };
 
-  const handleSave = () => {
-    saveSettings(settings);
-    setHasChanges(false);
+  const handleClose = () => {
     onSettingsSaved();
     onClose();
-  };
-
-  const handleReset = () => {
-    if (confirm('Reset all settings to defaults?')) {
-      resetSettings();
-      setSettings(DEFAULT_SETTINGS);
-      setHasChanges(true);
-    }
-  };
-
-  const handleCancel = () => {
-    if (hasChanges) {
-      if (confirm('Discard unsaved changes?')) onClose();
-    } else {
-      onClose();
-    }
   };
 
   // Custom badges
@@ -208,11 +194,12 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
   const categoryLabel = (key: string) => key.charAt(0).toUpperCase() + key.slice(1);
 
   return (
-    <div className="modal-overlay" onClick={handleCancel}>
+    <>
+    <div className="modal-overlay" onClick={handleClose}>
       <div className="settings-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">Settings</h2>
-          <button className="modal-close" onClick={handleCancel}>&times;</button>
+          <button className="modal-close" onClick={handleClose}>&times;</button>
         </div>
 
         <div className="settings-body">
@@ -758,19 +745,24 @@ export function Settings({ onClose, onSettingsSaved }: SettingsProps) {
         </div>
 
         <div className="settings-footer">
-          <button className="settings-btn settings-btn-reset" onClick={handleReset}>
-            Reset to Defaults
-          </button>
-          <div className="settings-footer-right">
-            <button className="settings-btn settings-btn-cancel" onClick={handleCancel}>
-              Cancel
-            </button>
-            <button className="settings-btn settings-btn-save" onClick={handleSave} disabled={!hasChanges}>
-              Save Changes
+          <div className="settings-footer-left">
+            {isSignedIn && (
+              <button
+                className="settings-btn settings-btn-warn"
+                onClick={() => { if (confirm('Disconnect Gmail? You can reconnect at any time.')) signOut(); }}
+              >
+                Disconnect Gmail
+              </button>
+            )}
+            <button className="settings-btn" onClick={() => setShowDebug(true)}>
+              Parser Debug
             </button>
           </div>
         </div>
       </div>
     </div>
+
+    {showDebug && <ParserDebugModal onClose={() => setShowDebug(false)} />}
+    </>
   );
 }

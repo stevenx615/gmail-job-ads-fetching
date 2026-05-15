@@ -23,12 +23,7 @@ export function GmailConnectButton() {
   }
 
   if (isSignedIn) {
-    return (
-      <button className="nav-btn nav-btn-outline" onClick={signOut} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <DisconnectIcon />
-        Disconnect Gmail
-      </button>
-    );
+    return null; // Disconnect lives in Settings → Gmail tab
   }
 
   return (
