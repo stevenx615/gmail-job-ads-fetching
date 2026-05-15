@@ -1,11 +1,13 @@
 import {
   collection,
   getDocs,
+  getDoc,
   addDoc,
   deleteDoc,
   updateDoc,
   doc,
   query,
+  where,
   orderBy,
   serverTimestamp,
   onSnapshot,
@@ -166,6 +168,32 @@ export function onJobsChanged(onUpdate: (jobId: string, data: Partial<Job>) => v
       }
     });
   });
+}
+
+export function watchJobDescription(jobId: string, onDescription: (description: string) => void): () => void {
+  const jobDoc = doc(db, COLLECTION_NAME, jobId);
+  return onSnapshot(jobDoc, (snap) => {
+    const description = snap.data()?.description;
+    if (description) onDescription(description);
+  });
+}
+
+export async function fetchMissingDescriptions(jobIds: string[]): Promise<Map<string, string>> {
+  const snaps = await Promise.all(jobIds.map(id => getDoc(doc(db, COLLECTION_NAME, id))));
+  const result = new Map<string, string>();
+  snaps.forEach((snap, i) => {
+    const desc = snap.data()?.description;
+    if (desc) result.set(jobIds[i], desc);
+  });
+  return result;
+}
+
+export async function fetchJobsWithDescriptions(): Promise<Map<string, string>> {
+  const q = query(collection(db, COLLECTION_NAME), where('description', '!=', ''));
+  const snap = await getDocs(q);
+  const result = new Map<string, string>();
+  snap.forEach(d => { const desc = d.data().description; if (desc) result.set(d.id, desc); });
+  return result;
 }
 
 export function invalidateJobsCache(): void {

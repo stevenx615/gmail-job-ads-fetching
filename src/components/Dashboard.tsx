@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged } from '../services/jobService';
+import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged, watchJobDescription, fetchMissingDescriptions } from '../services/jobService';
 import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
 import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
@@ -36,6 +36,9 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
   const [scrapingJobIds, setScrapingJobIds] = useState<Set<string>>(new Set());
   const [tailorModalJob, setTailorModalJob] = useState<Job | null>(null);
   const jobListRef = useRef<HTMLDivElement>(null);
+  const scrapingUnsubs = useRef<Map<string, () => void>>(new Map());
+  const jobsRef = useRef<Job[]>([]);
+  const recentlyOpenedRef = useRef<Set<string>>(new Set());
   const pageSize = settings.jobsPerPage;
 
   const loadJobs = useCallback(async () => {
@@ -49,6 +52,7 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
       } else {
         data = await getUnreadJobs();
       }
+      jobsRef.current = data;
       setJobs(data);
       setError(null);
     } catch (err) {
@@ -68,7 +72,7 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
 
   // Real-time listener: auto-update jobs when Firestore documents change
   useEffect(() => {
-    const unsubscribe = onJobsChanged((jobId, data) => {
+    return onJobsChanged((jobId, data) => {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, ...data } : j));
       if (data.description) {
         setScrapingJobIds(prev => {
@@ -79,7 +83,37 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
         });
       }
     });
-    return unsubscribe;
+  }, []);
+
+  // Clean up any active per-job scraping listeners on unmount
+  useEffect(() => {
+    const unsubs = scrapingUnsubs.current;
+    return () => unsubs.forEach(u => u());
+  }, []);
+
+  // Silently refresh jobs when tab becomes visible to pick up extension-scraped descriptions.
+  // The Firestore WebSocket can be suspended by the browser while the tab is in background,
+  // so real-time listeners may miss updates written by the extension in another tab.
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const opened = [...recentlyOpenedRef.current];
+      if (!opened.length) return;
+      recentlyOpenedRef.current.clear();
+      try {
+        const updates = await fetchMissingDescriptions(opened);
+        if (!updates.size) return;
+        jobsRef.current = jobsRef.current.map(j => updates.has(j.id) ? { ...j, description: updates.get(j.id) } : j);
+        setJobs(prev => prev.map(j => updates.has(j.id) ? { ...j, description: updates.get(j.id) } : j));
+        setScrapingJobIds(prev => {
+          if (!prev.size) return prev;
+          const next = new Set([...prev].filter(id => !updates.has(id)));
+          return next.size < prev.size ? next : prev;
+        });
+      } catch { /* silent */ }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
   const sources = useMemo(() => {
@@ -551,14 +585,21 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
                       <div className="job-card-top">
                         <div>
                           <h3 className="job-card-title">{job.url ? <a href={job.url} target="_blank" rel="noopener noreferrer" onClick={() => {
-                            if (settings.autoFetchDescriptions && !job.description) {
+                            if (!job.description) recentlyOpenedRef.current.add(job.id);
+                            if (settings.autoFetchDescriptions && !job.description && !scrapingUnsubs.current.has(job.id)) {
                               setScrapingJobIds(prev => new Set(prev).add(job.id));
-                              setTimeout(() => setScrapingJobIds(prev => {
-                                if (!prev.has(job.id)) return prev;
-                                const next = new Set(prev);
-                                next.delete(job.id);
-                                return next;
-                              }), 30000);
+                              const unsub = watchJobDescription(job.id, (description) => {
+                                setJobs(prev => prev.map(j => j.id === job.id ? { ...j, description } : j));
+                                setScrapingJobIds(prev => { const next = new Set(prev); next.delete(job.id); return next; });
+                                scrapingUnsubs.current.get(job.id)?.();
+                                scrapingUnsubs.current.delete(job.id);
+                              });
+                              scrapingUnsubs.current.set(job.id, unsub);
+                              setTimeout(() => {
+                                scrapingUnsubs.current.get(job.id)?.();
+                                scrapingUnsubs.current.delete(job.id);
+                                setScrapingJobIds(prev => { const next = new Set(prev); next.delete(job.id); return next; });
+                              }, 30000);
                             }
                           }}>{job.title}</a> : job.title}</h3>
                           <p className="job-card-company">{job.company}</p>

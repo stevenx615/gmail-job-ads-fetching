@@ -928,6 +928,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
             jobTitle={job.title ?? ''}
             jobCompany={job.company ?? ''}
             initialJD={localJobDescription}
+            htmlDescription={job.description || ''}
             onNext={handleWizardJDNext}
             onBack={onClose}
             onJDChange={setLocalJobDescription}
