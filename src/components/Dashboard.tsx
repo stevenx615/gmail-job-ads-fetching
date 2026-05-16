@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged, watchJobDescription, fetchMissingDescriptions } from '../services/jobService';
+import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged, watchJobDescription, fetchMissingDescriptions, updateCachedDescription } from '../services/jobService';
 import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
 import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
@@ -75,6 +75,7 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
     return onJobsChanged((jobId, data) => {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, ...data } : j));
       if (data.description) {
+        updateCachedDescription(jobId, data.description);
         setScrapingJobIds(prev => {
           if (!prev.has(jobId)) return prev;
           const next = new Set(prev);
@@ -103,6 +104,7 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
       try {
         const updates = await fetchMissingDescriptions(opened);
         if (!updates.size) return;
+        updates.forEach((description, jobId) => updateCachedDescription(jobId, description));
         jobsRef.current = jobsRef.current.map(j => updates.has(j.id) ? { ...j, description: updates.get(j.id) } : j);
         setJobs(prev => prev.map(j => updates.has(j.id) ? { ...j, description: updates.get(j.id) } : j));
         setScrapingJobIds(prev => {
@@ -589,6 +591,7 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
                             if (settings.autoFetchDescriptions && !job.description && !scrapingUnsubs.current.has(job.id)) {
                               setScrapingJobIds(prev => new Set(prev).add(job.id));
                               const unsub = watchJobDescription(job.id, (description) => {
+                                updateCachedDescription(job.id, description);
                                 setJobs(prev => prev.map(j => j.id === job.id ? { ...j, description } : j));
                                 setScrapingJobIds(prev => { const next = new Set(prev); next.delete(job.id); return next; });
                                 scrapingUnsubs.current.get(job.id)?.();

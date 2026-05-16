@@ -7,7 +7,7 @@ import { ApplicationsView } from './components/PipelineView';
 import { Settings } from './components/Settings';
 import { ResumeTailorWorkshop, STANDALONE_JOB } from './components/ResumeTailorWorkshop';
 import { getSettings } from './services/settingsService';
-import { getAllJobs } from './services/jobService';
+import { getAllJobs, runAutoCleanup } from './services/jobService';
 import { useGmailAuth } from './hooks/useGmailAuth';
 import './App.css';
 
@@ -67,6 +67,14 @@ function AppContent() {
   }, []);
 
   useEffect(() => { refreshCount(); }, [refreshTrigger, refreshCount]);
+
+  // Run auto-cleanup once per day; refresh dashboard if anything changed
+  useEffect(() => {
+    const { autoDeleteAfterDays, autoMarkReadAfterDays } = getSettings();
+    runAutoCleanup(autoDeleteAfterDays, autoMarkReadAfterDays).then(changed => {
+      if (changed) setRefreshTrigger(prev => prev + 1);
+    });
+  }, []);
 
   // Triggers both a Dashboard reload and badge count refresh
   const handleJobsChanged = useCallback(() => {

@@ -279,12 +279,85 @@ export async function fetchMissingDescriptions(jobIds: string[]): Promise<Map<st
   return result;
 }
 
+/**
+ * Patches a freshly-scraped description into both the in-memory cache and the
+ * IDB persistent cache so the next page refresh doesn't lose it.
+ */
+export function updateCachedDescription(jobId: string, description: string): void {
+  if (jobsCache) {
+    jobsCache = jobsCache.map(j => j.id === jobId ? { ...j, description } : j);
+  }
+  // Targeted IDB update — read the stored record, set description, put it back
+  getIDB().then(db => {
+    const tx = db.transaction(IDB_JOBS_STORE, 'readwrite');
+    const store = tx.objectStore(IDB_JOBS_STORE);
+    const req = store.get(jobId);
+    req.onsuccess = () => {
+      if (req.result) store.put({ ...req.result, description });
+    };
+  }).catch(() => { /* ignore — IDB may not be seeded yet */ });
+}
+
 export async function fetchJobsWithDescriptions(): Promise<Map<string, string>> {
   const q = query(collection(db, COLLECTION_NAME), where('description', '!=', ''));
   const snap = await getDocs(q);
   const result = new Map<string, string>();
   snap.forEach(d => { const desc = d.data().description; if (desc) result.set(d.id, desc); });
   return result;
+}
+
+const CLEANUP_TIMESTAMP_KEY = 'last_auto_cleanup';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+export async function runAutoCleanup(autoDeleteDays: number, autoMarkReadDays: number): Promise<boolean> {
+  // Skip if already ran in the last 24 hours
+  try {
+    const last = localStorage.getItem(CLEANUP_TIMESTAMP_KEY);
+    if (last && Date.now() - Number(last) < ONE_DAY_MS) return false;
+  } catch { return false; }
+
+  // Record timestamp first so a crash doesn't cause an infinite retry loop
+  try { localStorage.setItem(CLEANUP_TIMESTAMP_KEY, String(Date.now())); } catch { /* ignore */ }
+
+  if (autoDeleteDays === 0 && autoMarkReadDays === 0) return false;
+
+  const allJobs = await getAllJobs();
+  const now = Date.now();
+  let changed = false;
+
+  if (autoMarkReadDays > 0) {
+    const cutoff = now - autoMarkReadDays * ONE_DAY_MS;
+    const toMark = allJobs.filter(j => !j.read && new Date(j.dateReceived || 0).getTime() < cutoff);
+    for (const job of toMark) {
+      await updateDoc(doc(db, COLLECTION_NAME, job.id), { read: true });
+    }
+    if (toMark.length > 0) {
+      if (jobsCache) {
+        const ids = new Set(toMark.map(j => j.id));
+        jobsCache = jobsCache.map(j => ids.has(j.id) ? { ...j, read: true } : j);
+      }
+      clearPersistentCache();
+      changed = true;
+    }
+  }
+
+  if (autoDeleteDays > 0) {
+    const cutoff = now - autoDeleteDays * ONE_DAY_MS;
+    const toDelete = allJobs.filter(j => new Date(j.dateReceived || 0).getTime() < cutoff);
+    for (const job of toDelete) {
+      await deleteDoc(doc(db, COLLECTION_NAME, job.id));
+    }
+    if (toDelete.length > 0) {
+      if (jobsCache) {
+        const ids = new Set(toDelete.map(j => j.id));
+        jobsCache = jobsCache.filter(j => !ids.has(j.id));
+      }
+      clearPersistentCache();
+      changed = true;
+    }
+  }
+
+  return changed;
 }
 
 export function invalidateJobsCache(): void {

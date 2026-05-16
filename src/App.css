@@ -806,10 +806,10 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .ws-restored-badge { font-size: 0.68rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 20px; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); color: #a5b4fc; }
 
 /* Three-panel layout */
-.workshop-threepanel { display: flex; flex: 1; min-height: 0; overflow: hidden; gap: 0.85rem; padding: 0.85rem; background: var(--body-bg); }
+.workshop-threepanel { display: flex; flex: 1; min-height: 0; overflow: hidden; gap: 0; padding: 0.85rem; background: var(--body-bg); }
 
 /* Left nav — card listing sections */
-.ws-leftnav { width: 200px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: visible; }
+.ws-leftnav { width: 200px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: visible; margin-right: 0.75rem; }
 .ws-nav-sections { flex: 1; overflow-y: auto; padding-bottom: 0.5rem; }
 .ws-nav-add-wrap { position: relative; border-top: 1px solid var(--card-border); padding: 0.6rem; flex-shrink: 0; }
 .ws-nav-add-btn { display: flex; align-items: center; gap: 0.4rem; width: 100%; background: none; border: 1px dashed var(--card-border); border-radius: 8px; padding: 0.45rem 0.75rem; font-size: 0.78rem; color: var(--text-mid); cursor: pointer; transition: border-color 0.15s, color 0.15s; }
@@ -838,12 +838,19 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .ws-original-block-text { font-size: 0.83rem; line-height: 1.6; color: var(--text-mid); white-space: pre-wrap; }
 
 /* Right preview — card */
+.ws-resize-handle { width: 26px; flex-shrink: 0; cursor: col-resize; z-index: 30; position: relative; display: flex; align-items: center; justify-content: center; margin: 0 -5px; opacity: 1;}
+.ws-resize-handle::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 24px; height: 100%; }
+.ws-resize-handle::after { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 2px; height: 100%; border-radius: 4px; background: transparent; transition: background 0.15s; }
+.ws-resize-handle:hover::after, .ws-resize-handle:active::after { background: #818cf8; }
+.ws-resize-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2; color: #818cf8; background: var(--card-bg); border: 1.5px solid var(--wz-tips-border); border-radius: 20px; padding: 14px 6px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s, border-color 0.15s; pointer-events: none; }
+.ws-resize-handle:hover .ws-resize-icon, .ws-resize-handle:active .ws-resize-icon { opacity: 1; border-color: #818cf8; }
 .ws-preview { width: 700px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; }
-.ws-preview-header { display: flex; align-items: center; gap: 0.25rem; padding: 0.35rem 0.75rem; border-bottom: 1px solid var(--card-border); flex-shrink: 0; }
-.ws-preview-tab { background: none; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600; color: var(--text-light); padding: 0.3rem 0.6rem; border-radius: 6px; transition: color 0.15s, background 0.15s; }
-.ws-preview-tab:hover { color: var(--text-mid); background: rgba(255,255,255,0.04); }
-.ws-preview-tab.active { color: var(--text-dark); background: rgba(255,255,255,0.08); }
-.ws-preview-iframe { flex: 1; width: 100%; border: none; background: var(--body-bg); }
+.ws-preview--resizing { pointer-events: none; }
+.ws-preview-header { display: flex; align-items: center; gap: 0.25rem; padding: 0 0.75rem; border-bottom: 1px solid var(--card-border); flex-shrink: 0; }
+.ws-preview-tab { background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-size: 0.82rem; font-weight: 600; color: var(--text-light); padding: 0.55rem 0.5rem; margin-bottom: -1px; border-radius: 0; transition: color 0.15s; }
+.ws-preview-tab:hover { color: var(--text-mid); background: none; }
+.ws-preview-tab.active { color: var(--text-dark); border-bottom-color: #818cf8; }
+.ws-preview-iframe { flex: 1; width: 100%; border: none; background: var(--card-bg); }
 .ws-jd-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.25rem; }
 .ws-jd-panel .description-content { max-height: none; overflow-y: visible; }
 .ws-jd-text { font-size: 0.78rem; line-height: 1.7; color: var(--text-mid); }
@@ -855,7 +862,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .ws-tab.active { background: var(--body-bg); border-color: #6366f1; color: #a5b4fc; font-weight: 600; }
 .ws-tab-count { font-size: 0.68rem; background: var(--card-border); color: var(--text-mid); border-radius: 10px; padding: 0 0.35rem; min-width: 1.2rem; text-align: center; }
 .ws-tab.active .ws-tab-count { background: #6366f1; color: #fff; }
-.ws-reanalyze-btn { font-size: 0.73rem; padding: 0.3rem 0.65rem; border-radius: 6px; border: 1px solid var(--card-border); background: none; cursor: pointer; color: var(--text-mid); transition: all 0.12s; margin-right: 0.25rem; }
+.ws-reanalyze-btn { font-size: 0.8rem; font-weight: 700; padding: 0.3rem 0.65rem; border-radius: 6px; border: 1px solid var(--card-border); background: none; cursor: pointer; color: var(--text-mid); transition: all 0.12s; margin-right: 0.25rem; }
 .ws-reanalyze-btn:hover { border-color: #6366f1; color: #a5b4fc; }
 
 /* Table */
@@ -1030,7 +1037,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .ws-add-desc-btn { align-self: flex-start; background: none; border: 1px dashed var(--purple); border-radius: 6px; padding: 0.25rem 0.65rem; font-family: inherit; font-size: 0.78rem; font-weight: bold; color: var(--text-dark); cursor: pointer; margin-top: 0.15rem; transition: border-color 0.15s, color 0.15s; }
 .ws-add-desc-btn:hover { border-color: var(--ws-add-desc-hover-border); color: var(--ws-add-desc-hover-color); }
 .ws-add-desc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.ws-add-bullet-btn { align-self: stretch; text-align: left; white-space: normal; line-height: 1.45; display: flex; align-items: center; gap: 0.4rem; }
+.ws-add-bullet-btn { align-self: stretch; text-align: left; white-space: normal; line-height: 1.45; display: flex; align-items: center; gap: 0.4rem; padding: 0.8rem 1rem}
 /* Experience card bullet list */
 .ws-exp-bullets { border-top: 1px solid var(--card-border); margin-top: 0.75rem; padding-top: 0.6rem; display: flex; flex-direction: column; gap: 1.75rem; }
 .ws-exp-bullets-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-mid); margin-bottom: 0.1rem; }
@@ -1766,6 +1773,8 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Robo
 .wz-section-pick-desc { font-size: 0.78rem; color: var(--text-light); }
 .wz-section-pick-required { font-size: 0.72rem; font-weight: 600; color: #6366f1; background: rgba(99,102,241,0.12); border-radius: 20px; padding: 0.2rem 0.6rem; white-space: nowrap; }
 .wz-scratch-form { display: flex; flex-direction: column; gap: 0.65rem; }
+.wz-personal-tip { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.65rem 0.85rem; background: var(--wz-tips-bg); border: 1px solid var(--wz-tips-border); border-radius: 10px; font-size: 0.82rem; color: var(--text-mid); line-height: 1.45; }
+.ws-personal-tip { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.65rem 0.85rem; background: var(--wz-tips-bg); border: 1px solid var(--wz-tips-border); border-radius: 10px; font-size: 0.82rem; color: var(--text-mid); line-height: 1.45; margin-bottom: 0.5rem; }
 .wz-form-row { display: flex; gap: 0.65rem; }
 .wz-form-row .wz-field { flex: 1; }
 .wz-field { display: flex; flex-direction: column; gap: 0.3rem; }

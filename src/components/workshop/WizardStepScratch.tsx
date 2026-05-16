@@ -152,6 +152,10 @@ export function WizardStepScratch({ onComplete, onBack }: Props) {
 
       {sub === 'personal' && (
         <div className="wz-scratch-form">
+          <div className="wz-personal-tip">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span><strong>Tips:</strong> In the workshop you can <strong>drag</strong> any section to reorder it and <strong>toggle</strong> individual fields on or off before exporting.</span>
+          </div>
           <div className="wz-field"><label>Full Name</label><input value={personal.name} onChange={e => setPersonal(p => ({ ...p, name: e.target.value }))} placeholder="Jane Smith" /></div>
           <div className="wz-form-row">
             <div className="wz-field"><label>Email</label><input value={personal.email} onChange={e => setPersonal(p => ({ ...p, email: e.target.value }))} placeholder="jane@example.com" /></div>

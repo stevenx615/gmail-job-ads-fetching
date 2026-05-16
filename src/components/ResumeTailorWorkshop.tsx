@@ -216,6 +216,36 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const [buildDone, setBuildDone] = useState(false);
   const [previewTab, setPreviewTab] = useState<'preview' | 'jd'>('preview');
+  const [previewWidth, setPreviewWidth] = useState(() => {
+    try { const s = localStorage.getItem('ws_preview_width'); return s ? Math.max(320, Math.min(960, Number(s))) : 700; } catch { return 700; }
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartX = useRef(0);
+  const resizeStartW = useRef(0);
+  const resizeLiveW = useRef(previewWidth);
+  const threepanelRef = useRef<HTMLDivElement>(null);
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartX.current = e.clientX;
+    resizeStartW.current = previewWidth;
+    resizeLiveW.current = previewWidth;
+    setIsResizing(true);
+    const onMove = (ev: MouseEvent) => {
+      const containerW = threepanelRef.current?.clientWidth ?? 1200;
+      const maxW = containerW - 200 - 14 - 300; // leftnav(200) + handle(14) + editor min(300)
+      const next = Math.max(320, Math.min(maxW, resizeStartW.current + (resizeStartX.current - ev.clientX)));
+      resizeLiveW.current = next;
+      setPreviewWidth(next);
+    };
+    const onUp = () => {
+      setIsResizing(false);
+      try { localStorage.setItem('ws_preview_width', String(resizeLiveW.current)); } catch {}
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [previewWidth]);
   const [restored, setRestored] = useState(false);
   const [regeneratingBullets, setRegeneratingBullets] = useState<Record<string, boolean>>({});
   const [regeneratingQualifs, setRegeneratingQualifs] = useState<Record<number, boolean>>({});
@@ -661,14 +691,14 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     const empty = `<p style="color:${isDark ? '#4a527a' : '#9ca3af'};font-style:italic;text-align:center;padding:2rem 0">Your tailored resume will appear here as you make selections.</p>`;
 
     const t = isDark ? {
-      bodyBg: '#06090E', bodyColor: '#c5cee8',
+      bodyBg: '#0C1017', bodyColor: '#c5cee8',
       paperBg: '#0C1118', paperBorder: '#1A2330',
       name: '#f0f2fa', contact: '#7b85a8',
       section: '#818cf8', sectionBorder: '#1A2330',
       text: '#c5cee8', title: '#f0f2fa', meta: '#7b85a8',
       skillLabel: '#c5cee8',
     } : {
-      bodyBg: '#f3f5fb', bodyColor: '#374151',
+      bodyBg: '#ffffff', bodyColor: '#374151',
       paperBg: '#ffffff', paperBorder: '#dde2ee',
       name: '#111827', contact: '#6b7280',
       section: '#533ab6', sectionBorder: '#dde2ee',
@@ -1154,7 +1184,8 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
         {/* Three-panel layout */}
         {phase === 'review' && analysis && (
-          <div className="workshop-threepanel">
+          <div className="workshop-threepanel" ref={threepanelRef} style={{ cursor: isResizing ? 'col-resize' : undefined }}>
+            {isResizing && <div style={{ position: 'fixed', inset: 0, zIndex: 9999, cursor: 'col-resize' }} />}
 
             {/* ── Left nav ── */}
             <nav className="ws-leftnav">
@@ -1222,6 +1253,10 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                   <div className="ws-editor-section-title">Personal Info</div>
                 </div>
                 <div className="ws-editor-body">
+                  <div className="ws-personal-tip">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span><strong>Tips:</strong> <strong>Drag</strong> any row to reorder fields. Use the <strong>toggle</strong> to include or exclude a field from your resume.</span>
+                  </div>
                   <div className="ws-personal-form">
                     {personalFieldOrder.map((key, idx) => {
                       const def = PERSONAL_FIELD_DEFS.find(f => f.key === key)!;
@@ -1278,10 +1313,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               {/* Summary */}
               {activeSection === 'summary' && <>
                 <div className="ws-editor-header">
-                  <div>
-                    <div className="ws-editor-section-title">Professional Summary</div>
-                    <div className="ws-editor-subtitle">Edit your tailored summary for {job.title} at {job.company}</div>
-                  </div>
+                  <div className="ws-editor-section-title">Professional Summary</div>
                   <button
                     className={`ws-toggle${showSummarySection ? ' on' : ''}`}
                     onClick={() => setShowSummarySection(s => !s)}
@@ -1292,6 +1324,10 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                   </button>
                 </div>
                 <div className="ws-editor-body">
+                  <div className="ws-personal-tip">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span><strong>Tips:</strong> Edit the summary directly. Use the <strong>toggle</strong> in the header to show or hide this section. Your original summary is shown below for reference.</span>
+                  </div>
                   <textarea
                     className="ws-editor-textarea"
                     value={summary}
@@ -1329,6 +1365,10 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                   </button>
                 </div>
                 <div className="ws-editor-body">
+                  <div className="ws-personal-tip">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span><strong>Tips:</strong> Each card shows a job requirement and your matching experience. <strong>Click an option</strong> to select it. Use <strong>↺ Regenerate</strong> for a new suggestion or <strong>✎ Edit</strong> to tweak it manually.</span>
+                  </div>
                   {qualifications.length === 0
                     ? <div className="ws-empty">No requirements extracted.</div>
                     : qualifications.map((q, idx) => {
@@ -1471,6 +1511,10 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                   <button className="ws-reanalyze-btn" onClick={reanalyze}>↺ Re-analyze</button>
                 </div>
                 <div className="ws-editor-body">
+                  <div className="ws-personal-tip">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span><strong>Tips:</strong> <strong>Toggle</strong> each entry to include or exclude it. Bullets show <strong>O</strong> (original) and <strong>T</strong> (tailored) versions — click to switch. Use <strong>↺</strong> to regenerate a tailored bullet or <strong>+ Add Bullet</strong> for an AI suggestion.</span>
+                  </div>
                   {experience.length === 0
                     ? <div className="ws-empty">No experience extracted.</div>
                     : <div className="ws-edu-list">
@@ -1588,13 +1632,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               {/* Skills */}
               {activeSection === 'skills' && <>
                 <div className="ws-editor-header">
-                  <div>
-                    <div className="ws-editor-section-title">Skills</div>
-                    <div className="ws-editor-subtitle">Click to toggle · drag chips between categories · drag ⠿ to reorder</div>
-                    <div className="ws-editor-subtitle ws-skills-subhint">
-                      <span className="ws-skills-subhint-keyword">Yellow chips</span> are AI-suggested skills from the job post not found in your resume — include them if they apply to you
-                    </div>
-                  </div>
+                  <div className="ws-editor-section-title">Skills</div>
                   <button
                     className={`ws-toggle${showSkillsSection ? ' on' : ''}`}
                     onClick={() => setShowSkillsSection(s => !s)}
@@ -1605,6 +1643,10 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                   </button>
                 </div>
                 <div className="ws-editor-body">
+                  <div className="ws-personal-tip">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span><strong>Tips:</strong> <strong>Click</strong> a chip to toggle it on/off. <strong>Drag</strong> chips between categories or use <strong>⠿</strong> to reorder categories. <strong>Double-click</strong> a category label to rename it. <span style={{ color: '#f59e0b' }}>Yellow chips</span> are AI-suggested skills from the job post — add them if they apply.</span>
+                  </div>
                   {(() => {
                     const grouped = skills.reduce<Record<string, { skill: typeof skills[0]; idx: number }[]>>((acc, skill, idx) => {
                       const cat = skill.category || 'Other';
@@ -1739,9 +1781,12 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               {activeSection === 'education' && <>
                 <div className="ws-editor-header">
                   <div className="ws-editor-section-title">Education</div>
-                  <div className="ws-editor-subtitle">Edit entries and toggle each to include or exclude</div>
                 </div>
                 <div className="ws-editor-body">
+                  <div className="ws-personal-tip">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span><strong>Tips:</strong> <strong>Toggle</strong> each entry to include or exclude it from your resume. Use <strong>✕</strong> to delete an entry or <strong>+ Add Entry</strong> to add a new one.</span>
+                  </div>
                   <div className="ws-edu-list">
                     {education.map((edu, idx) => {
                       const setField = (field: keyof TailorEducation, val: string) =>
@@ -1808,6 +1853,10 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                     <button className={`ws-toggle${sec.include ? ' on' : ''}`} onClick={() => setCustomSections(prev => prev.map(s => s.id === sec.id ? { ...s, include: !s.include } : s))} title={sec.include ? 'Hide from resume' : 'Show in resume'}><span className="ws-toggle-thumb" /></button>
                   </div>
                   <div className="ws-editor-body">
+                    <div className="ws-personal-tip">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem', color: '#818cf8' }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      <span><strong>Tips:</strong> Use the header <strong>toggle</strong> to show or hide this entire section. <strong>Toggle</strong> individual entries to include or exclude them. Use <strong>✕</strong> to remove an entry or <strong>+ Add Entry</strong> to add one.</span>
+                    </div>
                     <div className="ws-edu-list">
                       {sec.entries.map((entry, ei) => (
                         <div key={ei} className={`ws-edu-card${entry.include ? '' : ' excluded'}`}>
@@ -1867,15 +1916,23 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
             </div>
 
+            {/* ── Resize handle ── */}
+            <div className="ws-resize-handle" onMouseDown={handleResizeMouseDown}>
+              <div className="ws-resize-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="9" y1="4" x2="9" y2="20"/><line x1="15" y1="4" x2="15" y2="20"/>
+                </svg>
+              </div>
+            </div>
+
             {/* ── Right preview ── */}
-            <div className="ws-preview">
+            <div className={`ws-preview${isResizing ? ' ws-preview--resizing' : ''}`} style={{ width: previewWidth }}>
               <div className="ws-preview-header">
                 <button className={`ws-preview-tab${previewTab === 'preview' ? ' active' : ''}`} onClick={() => setPreviewTab('preview')}>Live Preview</button>
                 <button className={`ws-preview-tab${previewTab === 'jd' ? ' active' : ''}`} onClick={() => setPreviewTab('jd')}>Job Description</button>
               </div>
               <iframe
                 ref={previewIframeRef}
-                className="ws-preview-iframe"
                 title="Resume Preview"
                 sandbox="allow-same-origin"
                 className={`ws-preview-iframe${previewTab !== 'preview' ? ' ws-preview-iframe--hidden' : ''}`}
