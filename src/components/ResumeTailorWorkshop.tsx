@@ -10,7 +10,7 @@ import { WizardStepResume } from './workshop/WizardStepResume';
 import { WizardStepScratch } from './workshop/WizardStepScratch';
 import type { WizardStep, ScratchResume } from './workshop/wizardTypes';
 import { assembleResumeText } from './workshop/wizardTypes';
-import { saveResume } from './workshop/resumeStorage';
+import { saveResume, getSavedResumes } from './workshop/resumeStorage';
 
 interface Props {
   job: Job;
@@ -52,17 +52,18 @@ function saveTailorState(jobId: string, data: object) {
   try { localStorage.setItem(storageKey(jobId), JSON.stringify(data)); } catch {}
 }
 
+type ScrapedMeta = { title: string; company: string; location: string; salary: string; jobType: string };
 const navKey = (jobId: string) => `wz_nav_${jobId}`;
-function loadNavState(jobId: string): { step: WizardStep; jd: string } | null {
+function loadNavState(jobId: string): { step: WizardStep; jd: string; scraped?: ScrapedMeta } | null {
   try {
     const raw = localStorage.getItem(navKey(jobId));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
-function saveNavState(jobId: string, step: WizardStep, jd: string) {
+function saveNavState(jobId: string, step: WizardStep, jd: string, scraped?: ScrapedMeta) {
   try {
     if (step === 'workshop') { localStorage.removeItem(navKey(jobId)); return; }
-    localStorage.setItem(navKey(jobId), JSON.stringify({ step, jd }));
+    localStorage.setItem(navKey(jobId), JSON.stringify({ step, jd, scraped }));
   } catch {}
 }
 
@@ -117,6 +118,86 @@ const CUSTOM_SECTION_TYPES: SectionTypeDef[] = [
 
 function emptyEntry(def: SectionTypeDef): CustomSectionEntry {
   return { fields: Object.fromEntries(def.fields.map(f => [f.key, ''])), include: true };
+}
+
+// Irregular past-tense verbs and short/common forms that don't end in -ed
+const ACTION_VERBS_IRREGULAR = new Set(['built','cut','drove','fed','grew','led','met','ran','rose','set','sold','spoke','taught','told','won','wrote']);
+function isActionVerb(word: string): boolean {
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (w.length < 3) return false;
+  // Past tense regular verbs end in -ed (>= 4 chars: e.g. "used", "led" excluded via length)
+  if (w.endsWith('ed') && w.length >= 4) return true;
+  // Present-participle / gerund forms (-ing) used in some resume styles
+  if (w.endsWith('ing') && w.length >= 5) return true;
+  return ACTION_VERBS_IRREGULAR.has(w);
+}
+
+const SCORE_IMPACT: Record<string, string> = {
+  'Tailored bullets': '+8–12 pts',
+  'Requirements match': '+6–10 pts',
+  'Quantified results': '+4–8 pts',
+  'Keyword coverage': '+5–9 pts',
+  'Action verbs': '+3–6 pts',
+  'Summary depth': '+2–4 pts',
+  'Bullet density': '+2–3 pts',
+  'Contact info': '+1–2 pts',
+  'Education': '+1–2 pts',
+};
+
+function suggestVerbFix(text: string): string {
+  const t = text.trim();
+  if (/^responsible for /i.test(t)) return 'Managed' + t.slice('responsible for'.length);
+  if (/^in charge of /i.test(t)) return 'Oversaw' + t.slice('in charge of'.length);
+  if (/^worked on /i.test(t)) return 'Built' + t.slice('worked on'.length);
+  if (/^helped /i.test(t)) return 'Contributed to' + t.slice('helped'.length);
+  if (/^was /i.test(t)) return 'Served as' + t.slice('was'.length);
+  return 'Led ' + t.charAt(0).toLowerCase() + t.slice(1);
+}
+
+function suggestMetricFix(text: string): string {
+  return text.trim().replace(/[.!?]$/, '') + ' — e.g., by 35%, saving $50K, or for 10K+ users';
+}
+
+function highlightKeywordsInHtml(html: string, matched: string[], missing: string[], weak: string[]): string {
+  type KwEntry = { kw: string; cls: string };
+  const entries: KwEntry[] = [
+    ...missing.map(kw => ({ kw, cls: 'jd-kw jd-kw-missing' })),
+    ...weak.map(kw => ({ kw, cls: 'jd-kw jd-kw-weak' })),
+    ...matched.map(kw => ({ kw, cls: 'jd-kw jd-kw-matched' })),
+  ].sort((a, b) => b.kw.length - a.kw.length);
+  if (entries.length === 0) return html;
+  const escaped = entries.map(e => e.kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  function walk(node: Node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? '';
+      if (!regex.test(text)) { regex.lastIndex = 0; return; }
+      regex.lastIndex = 0;
+      const span = document.createElement('span');
+      span.innerHTML = text.replace(regex, match => {
+        const lm = match.toLowerCase();
+        const entry = entries.find(e => e.kw.toLowerCase() === lm);
+        return entry ? `<mark class="${entry.cls}">${match}</mark>` : match;
+      });
+      node.parentNode?.replaceChild(span, node);
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = (node as Element).tagName.toLowerCase();
+      if (tag === 'script' || tag === 'style' || tag === 'mark') return;
+      Array.from(node.childNodes).forEach(walk);
+    }
+  }
+  walk(container);
+  return container.innerHTML;
+}
+
+function normalizeSectionTitle(title: string): string {
+  // If the title has no lowercase letters but has at least one uppercase letter, it's all-caps.
+  if (!/[a-z]/.test(title) && /[A-Z]/.test(title)) {
+    return title.toLowerCase().replace(/(?:^|\s)\S/g, c => c.toUpperCase());
+  }
+  return title;
 }
 
 const DEFAULT_SKILL_CATEGORIES = ['Languages', 'Frameworks', 'Databases', 'Cloud & DevOps', 'Tools', 'Soft Skills', 'Other'];
@@ -182,9 +263,19 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   const [navDir, setNavDir] = useState<'forward' | 'backward'>('forward');
   const [localJobDescription, setLocalJobDescription] = useState(() => {
     const nav = loadNavState(job.id);
+    // Prefer job.description (most up-to-date, e.g. freshly scraped via job card) over
+    // a saved nav-state jd, unless the nav state was itself set from the wizard's own fetch
+    // (detected by scrapedMeta being present in nav state).
+    if (nav?.jd && nav?.scraped) return nav.jd;
+    if (job.description) return job.description;
     if (nav?.jd) return nav.jd;
-    return job.description ? job.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+    return '';
   });
+  const [scrapedMeta, setScrapedMeta] = useState<ScrapedMeta | null>(() => loadNavState(job.id)?.scraped ?? null);
+  const scrapedTitle   = scrapedMeta?.title   ?? '';
+  const scrapedCompany = scrapedMeta?.company ?? '';
+  const effectiveTitle   = scrapedTitle   || job.title   || '';
+  const effectiveCompany = scrapedCompany || job.company || '';
   const [wizardDocxFile, setWizardDocxFile] = useState<File | null>(null);
   type Phase = 'extracting' | 'analyzing' | 'review';
   const [phase, setPhase] = useState<Phase>('analyzing');
@@ -193,7 +284,12 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   const [plainResume, setPlainResume] = useState('');
   const [analysis, setAnalysis] = useState<TailorAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<string>('summary');
+  const [activeSection, setActiveSection] = useState<string>('overview');
+  const [kwTab, setKwTab] = useState<'matched' | 'missing' | 'weak'>('missing');
+  const [sectionOrder, setSectionOrder] = useState<string[]>(['summary', 'requirements', 'experience', 'education', 'skills']);
+  const [navReorderMode, setNavReorderMode] = useState(false);
+  const [navDragOverIdx, setNavDragOverIdx] = useState<number | null>(null);
+  const navDragIdx = useRef<number | null>(null);
   const [summary, setSummary] = useState('');
   const [qualifications, setQualifications] = useState<TailorQualification[]>([]);
   const [qualifOverrides, setQualifOverrides] = useState<(string | null)[]>([]);
@@ -216,6 +312,7 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const [buildDone, setBuildDone] = useState(false);
   const [previewTab, setPreviewTab] = useState<'preview' | 'jd'>('preview');
+  const [jdHighlight, setJdHighlight] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(() => {
     try { const s = localStorage.getItem('ws_preview_width'); return s ? Math.max(320, Math.min(960, Number(s))) : 700; } catch { return 700; }
   });
@@ -281,7 +378,12 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     setSkills(a.skills);
     setSkillCategoryOrder(initSkillCategoryOrder(a.skills));
     setEducation(a.education.map(e => ({ ...e, include: true })));
-    setCustomSections(a.customSections ?? []);
+    setCustomSections((a.customSections ?? []).map(s => ({ ...s, title: normalizeSectionTitle(s.title) })));
+    setSectionOrder(prev => {
+      const standardKeys = new Set(['summary', 'requirements', 'experience', 'education', 'skills']);
+      const customIds = (a.customSections ?? []).map((s: CustomSection) => s.id);
+      return [...prev.filter(k => standardKeys.has(k)), ...customIds];
+    });
     const modes: Record<string, BulletMode> = {};
     a.experience.forEach((exp, ei) => exp.bullets.forEach((_, bi) => { modes[`${ei}-${bi}`] = 'tailored'; }));
     setBulletModes(modes);
@@ -293,8 +395,9 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     setPhase('analyzing');
     setError(null);
     setBuildDone(false);
-    const desc = jobDesc.trim() || `${job.title} at ${job.company}`;
-    const result = await analyzeTailorSections(resume, desc, job.title, job.company, settings);
+    const plain = stripHtml(jobDesc);
+    const desc = plain.trim() || `${effectiveTitle} at ${effectiveCompany}`;
+    const result = await analyzeTailorSections(resume, desc, effectiveTitle, effectiveCompany, settings);
     if (result.error || !result.analysis) { setError(result.error || 'Analysis failed'); return false; }
     applyAnalysis(result.analysis);
     return true;
@@ -315,7 +418,12 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
       if ('text' in e) return { program: (e as { text: string; include: boolean }).text, school: '', location: '', startDate: '', endDate: '', include: (e as { include: boolean }).include };
       return e as TailorEducation & { include: boolean };
     }));
-    if (Array.isArray(saved.customSections)) setCustomSections(saved.customSections as CustomSection[]);
+    if (Array.isArray(saved.customSections)) {
+      setCustomSections((saved.customSections as CustomSection[]).map(s => ({ ...s, title: normalizeSectionTitle(s.title) })));
+      const standardKeys = new Set(['summary', 'requirements', 'experience', 'education', 'skills']);
+      const customIds = (saved.customSections as CustomSection[]).map(s => s.id);
+      setSectionOrder(prev => [...prev.filter(k => standardKeys.has(k)), ...customIds]);
+    }
     if (saved.showSummarySection !== undefined) setShowSummarySection(saved.showSummarySection);
     if (saved.showRequirementsSection !== undefined) setShowRequirementsSection(saved.showRequirementsSection);
     if (saved.showSkillsSection !== undefined) setShowSkillsSection(saved.showSkillsSection);
@@ -324,6 +432,8 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     if (saved.personalFieldOrder) setPersonalFieldOrder(saved.personalFieldOrder);
     if (Array.isArray(saved.skillCategoryOrder)) setSkillCategoryOrder(saved.skillCategoryOrder as string[]);
     else setSkillCategoryOrder(initSkillCategoryOrder(saved.skills ?? []));
+    if (saved.jd) setLocalJobDescription(saved.jd as string);
+    if (saved.scrapedMeta) setScrapedMeta(saved.scrapedMeta as ScrapedMeta);
     setPhase('review');
     setRestored(true);
     return true;
@@ -342,12 +452,12 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
 
   // Run analysis when wizard reaches 'analyzing' step
   useEffect(() => {
-    saveNavState(job.id, wizardStep, localJobDescription);
+    saveNavState(job.id, wizardStep, localJobDescription, scrapedMeta ?? undefined);
   }, [wizardStep, localJobDescription]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Simulate step-by-step progress during analysis
+  // Simulate step-by-step progress during analysis (wizard step AND workshop re-analyze)
   useEffect(() => {
-    if (wizardStep !== 'analyzing') return;
+    if (wizardStep !== 'analyzing' && phase === 'review') return;
     if (phase === 'extracting') { setAnalyzingStep(0); return; }
     if (phase === 'analyzing') {
       setAnalyzingStep(1);
@@ -359,8 +469,8 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
       const t3 = setTimeout(() => setAnalyzingStep(4), d3);
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
     }
-    // phase === 'review': API finished before animation completed — fast-forward to final step
-    setAnalyzingStep(4);
+    // phase === 'review': API finished before animation — fast-forward (wizard only; workshop shows nothing)
+    if (wizardStep === 'analyzing') setAnalyzingStep(4);
   }, [phase, wizardStep]);
 
   // Transition to workshop only after API done AND all steps shown
@@ -399,8 +509,8 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   // Auto-save whenever user edits any section
   useEffect(() => {
     if (phase !== 'review' || !analysis) return;
-    saveTailorState(job.id, { analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder });
-  }, [phase, analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+    saveTailorState(job.id, { analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder, jd: localJobDescription, scrapedMeta });
+  }, [phase, analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder, localJobDescription, scrapedMeta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!showAddMenu) return;
@@ -413,7 +523,7 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     return () => document.removeEventListener('mousedown', handler);
   }, [showAddMenu]);
 
-  const reanalyze = () => { setRestored(false); runAnalysis(plainResume, localJobDescription); };
+  const reanalyze = () => { setRestored(false); setAnalyzingStep(0); runAnalysis(plainResume, localJobDescription); };
 
   function handleWizardJDNext(jd: string) {
     setLocalJobDescription(jd);
@@ -423,24 +533,35 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
 
   function handleWizardUpload(file: File) {
     setWizardDocxFile(file);
+    setResumeName(file.name.replace(/\.[^.]+$/, ''));
     setWizardStep('analyzing');
   }
 
   function handleScratchComplete(scratch: ScratchResume) {
     const text = assembleResumeText(scratch);
-    saveResume({ name: scratch.personal.name ? `${scratch.personal.name} (scratch)` : 'Scratch Resume', type: 'scratch', content: text, preview: text.slice(0, 150) });
+    const name = scratch.personal.name ? `${scratch.personal.name} (scratch)` : 'Scratch Resume';
+    saveResume({ name, type: 'scratch', content: text, preview: text.slice(0, 150) });
+    setResumeName(name);
     setPlainResume(text);
     setWizardStep('analyzing');
   }
 
   function handleSelectResume(content: string, resumeId?: string) {
-    if (resumeId) localStorage.setItem(`wz_resume_${job.id}`, resumeId);
+    if (resumeId) {
+      localStorage.setItem(`wz_resume_${job.id}`, resumeId);
+      const saved = getSavedResumes().find(r => r.id === resumeId);
+      if (saved?.name) setResumeName(saved.name);
+    }
     setPlainResume(content);
     setWizardStep('analyzing');
   }
 
   function handleGoToWorkshop(content: string, resumeId?: string) {
-    if (resumeId) localStorage.setItem(`wz_resume_${job.id}`, resumeId);
+    if (resumeId) {
+      localStorage.setItem(`wz_resume_${job.id}`, resumeId);
+      const saved = getSavedResumes().find(r => r.id === resumeId);
+      if (saved?.name) setResumeName(saved.name);
+    }
     setPlainResume(content);
     restoreFromSaved();
     setWizardStep('workshop');
@@ -453,6 +574,11 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
   }
 
   const analyzedResumeId = localStorage.getItem(`wz_resume_${job.id}`);
+  const [resumeName, setResumeName] = useState<string>(() => localStorage.getItem(`wz_resume_name_${job.id}`) ?? '');
+  useEffect(() => {
+    if (resumeName) localStorage.setItem(`wz_resume_name_${job.id}`, resumeName);
+  }, [resumeName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const resumeDisplayName = resumeName || null;
 
   const getBulletMode = (ei: number, bi: number): BulletMode => bulletModes[`${ei}-${bi}`] ?? 'tailored';
   const toggleBulletMode = (ei: number, bi: number) =>
@@ -519,7 +645,7 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     const bullet = experience[ei]?.bullets[bi];
     if (!bullet) return;
     setRegeneratingBullets(prev => ({ ...prev, [key]: true }));
-    const result = await regenerateBullet(bullet.text, job.title, job.company, bullet.keywords, settings);
+    const result = await regenerateBullet(bullet.text, effectiveTitle, effectiveCompany, bullet.keywords, settings);
     if (result.tailored) {
       setExperience(prev => prev.map((ex, i) => i !== ei ? ex : {
         ...ex,
@@ -531,8 +657,8 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
 
   const fetchBulletSuggestion = useCallback(async (ei: number, exp: TailorExperience) => {
     setLoadingSuggestions(prev => ({ ...prev, [ei]: true }));
-    const jobDesc = job.description ? stripHtml(job.description) : `${job.title} at ${job.company}`;
-    const result = await suggestBullet(exp.title, exp.company, job.title, job.company, jobDesc, analysis?.matchedKeywords ?? [], settings);
+    const jobDesc = job.description ? stripHtml(job.description) : `${effectiveTitle} at ${effectiveCompany}`;
+    const result = await suggestBullet(exp.title, exp.company, effectiveTitle, effectiveCompany, jobDesc, analysis?.matchedKeywords ?? [], settings);
     setPendingSuggestions(prev => ({ ...prev, [ei]: result.text ? { text: result.text, keywords: result.keywords } : null }));
     setLoadingSuggestions(prev => ({ ...prev, [ei]: false }));
   }, [job, analysis, settings]);
@@ -568,7 +694,7 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
     if (!q) return;
     setRegeneratingQualifs(prev => ({ ...prev, [idx]: true }));
     const currentMatch = qualifOverrides[idx] ?? q.match;
-    const result = await regenerateQualification(q.requirement, job.title, job.company, currentMatch, settings);
+    const result = await regenerateQualification(q.requirement, effectiveTitle, effectiveCompany, currentMatch, settings);
     if (result.text) {
       setQualifOverrides(prev => { const n = [...prev]; n[idx] = result.text; return n; });
       setQualifications(prev => prev.map((qi, i) => i === idx ? { ...qi, include: true } : qi));
@@ -591,99 +717,100 @@ export function ResumeTailorWorkshop({ job, settings, onClose }: Props) {
       content += `<div class="r-contact">${contactParts.join(' &nbsp;|&nbsp; ')}</div>`;
     }
 
-    // Summary
-    if (showSummarySection && summary.trim()) {
-      content += `<div class="r-section">Professional Summary</div><p>${summary.replace(/\n/g, '<br>')}</p>`;
-    }
-
-    // Key Qualifications
-    const includedQualifs = qualifications
-      .map((q, i) => ({ ...q, effectiveText: qualifOverrides[i] ?? q.match }))
-      .filter(q => q.include && q.effectiveText);
-    if (showRequirementsSection && includedQualifs.length > 0) {
-      content += `<div class="r-section">Key Qualifications</div><ul>${includedQualifs.map(q => `<li>${q.effectiveText}</li>`).join('')}</ul>`;
-    }
-
-    // Experience
-    const expSections = experience.filter(e => e.include !== false).map((exp, ei) => {
-      const origEi = experience.indexOf(exp);
-      const bullets = exp.bullets.map((b, bi) => {
-        const mode = getBulletMode(origEi, bi);
-        return mode === 'tailored' && b.tailored ? b.tailored : b.text;
-      });
-      return { ...exp, bullets };
-    }).filter(e => e.bullets.length > 0);
-    if (expSections.length > 0) {
-      content += `<div class="r-section">Work Experience</div>`;
-      for (const exp of expSections) {
-        content += `<div class="exp-block">`;
-        content += `<div class="exp-hdr"><span class="exp-title">${exp.title}</span><span class="exp-period">${exp.period || ''}</span></div>`;
-        const expMeta = [exp.company, exp.location].filter(Boolean).join(', ');
-        if (expMeta) content += `<div class="exp-meta">${expMeta}</div>`;
-        content += `<ul>${exp.bullets.map(b => `<li>${b}</li>`).join('')}</ul>`;
-        content += `</div>`;
-      }
-    }
-
-    // Education
-    const includedEdu = education.filter(e => e.include);
-    if (includedEdu.length > 0) {
-      content += `<div class="r-section">Education</div>`;
-      for (const e of includedEdu) {
-        const datePart = [e.startDate, e.endDate].filter(Boolean).join(' – ');
-        const eduMeta = [e.school, e.location].filter(Boolean).join(', ');
-        content += `<div class="exp-block">`;
-        content += `<div class="exp-hdr"><span class="exp-title">${e.program || ''}</span><span class="exp-period">${datePart}</span></div>`;
-        if (eduMeta) content += `<div class="exp-meta">${eduMeta}</div>`;
-        content += `</div>`;
-      }
-    }
-
-    // Skills grouped by category
-    const includedSkills = skills.filter(s => s.include);
-    if (showSkillsSection && includedSkills.length > 0) {
-      content += `<div class="r-section">Skills</div>`;
-      const skillsByCat = includedSkills.reduce<Record<string, string[]>>((acc, s) => {
-        const cat = s.category || 'Other';
-        if (!acc[cat]) acc[cat] = [];
-        acc[cat].push(s.name);
-        return acc;
-      }, {});
-      const orderedCats = [...new Set([...skillCategoryOrder, ...Object.keys(skillsByCat)])].filter(c => skillsByCat[c]?.length);
-      content += `<ul>${orderedCats.map(cat =>
-        `<li><span class="skill-cat-label">${cat}:</span> ${skillsByCat[cat].join(', ')}</li>`
-      ).join('')}</ul>`;
-    }
-
-    // Custom extra sections
-    for (const sec of customSections.filter(s => s.include)) {
-      const includedEntries = sec.entries.filter(e => e.include);
-      if (!includedEntries.length) continue;
-      content += `<div class="r-section">${sec.title}</div>`;
-      for (const entry of includedEntries) {
-        const f = entry.fields;
-        if (sec.type === 'volunteer' || sec.type === 'additional') {
-          const role = f.role || ''; const org = f.org || f.company || ''; const loc = f.location || '';
-          const period = sec.type === 'volunteer'
-            ? [f.startDate, f.endDate].filter(Boolean).join(' – ')
-            : (f.period || '');
-          content += `<div class="exp-block"><div class="exp-hdr"><span class="exp-title">${role}</span><span class="exp-period">${period}</span></div>`;
-          const meta = [org, loc].filter(Boolean).join(', ');
-          if (meta) content += `<div class="exp-meta">${meta}</div>`;
-          const descLines = (f.description || '').split('\n').filter(Boolean);
-          if (descLines.length) content += `<ul>${descLines.map(l => `<li>${l}</li>`).join('')}</ul>`;
-          content += `</div>`;
-        } else if (sec.type === 'projects') {
-          content += `<div class="exp-block"><div class="exp-hdr"><span class="exp-title">${f.name || ''}</span><span class="exp-period">${f.period || ''}</span></div>`;
-          const meta = [f.tech, f.link].filter(Boolean).join(' · ');
-          if (meta) content += `<div class="exp-meta">${meta}</div>`;
-          const descLines = (f.description || '').split('\n').filter(Boolean);
-          if (descLines.length) content += `<ul>${descLines.map(l => `<li>${l}</li>`).join('')}</ul>`;
-          content += `</div>`;
-        } else {
-          const def = CUSTOM_SECTION_TYPES.find(d => d.type === sec.type);
-          const parts = (def?.fields ?? []).map(fd => f[fd.key]).filter(Boolean);
-          content += `<ul><li>${parts.join(' · ')}</li></ul>`;
+    // Sections in user-defined order
+    for (const key of sectionOrder) {
+      if (key === 'summary') {
+        if (showSummarySection && summary.trim()) {
+          content += `<div class="r-section">Professional Summary</div><p>${summary.replace(/\n/g, '<br>')}</p>`;
+        }
+      } else if (key === 'requirements') {
+        const includedQualifs = qualifications
+          .map((q, i) => ({ ...q, effectiveText: qualifOverrides[i] ?? q.match }))
+          .filter(q => q.include && q.effectiveText);
+        if (showRequirementsSection && includedQualifs.length > 0) {
+          content += `<div class="r-section">Key Qualifications</div><ul>${includedQualifs.map(q => `<li>${q.effectiveText}</li>`).join('')}</ul>`;
+        }
+      } else if (key === 'experience') {
+        const expSections = experience.filter(e => e.include !== false).map(exp => {
+          const origEi = experience.indexOf(exp);
+          const bullets = exp.bullets.map((b, bi) => {
+            const mode = getBulletMode(origEi, bi);
+            return mode === 'tailored' && b.tailored ? b.tailored : b.text;
+          });
+          return { ...exp, bullets };
+        }).filter(e => e.bullets.length > 0);
+        if (expSections.length > 0) {
+          content += `<div class="r-section">Work Experience</div>`;
+          for (const exp of expSections) {
+            content += `<div class="exp-block">`;
+            content += `<div class="exp-hdr"><span class="exp-title">${exp.title}</span><span class="exp-period">${exp.period || ''}</span></div>`;
+            const expMeta = [exp.company, exp.location].filter(Boolean).join(', ');
+            if (expMeta) content += `<div class="exp-meta">${expMeta}</div>`;
+            content += `<ul>${exp.bullets.map(b => `<li>${b}</li>`).join('')}</ul>`;
+            content += `</div>`;
+          }
+        }
+      } else if (key === 'education') {
+        const includedEdu = education.filter(e => e.include);
+        if (includedEdu.length > 0) {
+          content += `<div class="r-section">Education</div>`;
+          for (const e of includedEdu) {
+            const datePart = [e.startDate, e.endDate].filter(Boolean).join(' – ');
+            const eduMeta = [e.school, e.location].filter(Boolean).join(', ');
+            content += `<div class="exp-block">`;
+            content += `<div class="exp-hdr"><span class="exp-title">${e.program || ''}</span><span class="exp-period">${datePart}</span></div>`;
+            if (eduMeta) content += `<div class="exp-meta">${eduMeta}</div>`;
+            content += `</div>`;
+          }
+        }
+      } else if (key === 'skills') {
+        const includedSkills = skills.filter(s => s.include);
+        if (showSkillsSection && includedSkills.length > 0) {
+          content += `<div class="r-section">Skills</div>`;
+          const skillsByCat = includedSkills.reduce<Record<string, string[]>>((acc, s) => {
+            const cat = s.category || 'Other';
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(s.name);
+            return acc;
+          }, {});
+          const orderedCats = [...new Set([...skillCategoryOrder, ...Object.keys(skillsByCat)])].filter(c => skillsByCat[c]?.length);
+          content += `<ul>${orderedCats.map(cat =>
+            `<li><span class="skill-cat-label">${cat}:</span> ${skillsByCat[cat].join(', ')}</li>`
+          ).join('')}</ul>`;
+        }
+      } else {
+        const sec = customSections.find(s => s.id === key);
+        if (sec && sec.include) {
+          const includedEntries = sec.entries.filter(e => e.include);
+          if (includedEntries.length > 0) {
+            content += `<div class="r-section">${sec.title}</div>`;
+            for (const entry of includedEntries) {
+              const f = entry.fields;
+              if (sec.type === 'volunteer' || sec.type === 'additional') {
+                const role = f.role || ''; const org = f.org || f.company || ''; const loc = f.location || '';
+                const period = sec.type === 'volunteer'
+                  ? [f.startDate, f.endDate].filter(Boolean).join(' – ')
+                  : (f.period || '');
+                content += `<div class="exp-block"><div class="exp-hdr"><span class="exp-title">${role}</span><span class="exp-period">${period}</span></div>`;
+                const meta = [org, loc].filter(Boolean).join(', ');
+                if (meta) content += `<div class="exp-meta">${meta}</div>`;
+                const descLines = (f.description || '').split('\n').filter(Boolean);
+                if (descLines.length) content += `<ul>${descLines.map(l => `<li>${l}</li>`).join('')}</ul>`;
+                content += `</div>`;
+              } else if (sec.type === 'projects') {
+                content += `<div class="exp-block"><div class="exp-hdr"><span class="exp-title">${f.name || ''}</span><span class="exp-period">${f.period || ''}</span></div>`;
+                const meta = [f.tech, f.link].filter(Boolean).join(' · ');
+                if (meta) content += `<div class="exp-meta">${meta}</div>`;
+                const descLines = (f.description || '').split('\n').filter(Boolean);
+                if (descLines.length) content += `<ul>${descLines.map(l => `<li>${l}</li>`).join('')}</ul>`;
+                content += `</div>`;
+              } else {
+                const def = CUSTOM_SECTION_TYPES.find(d => d.type === sec.type);
+                const parts = (def?.fields ?? []).map(fd => f[fd.key]).filter(Boolean);
+                content += `<ul><li>${parts.join(' · ')}</li></ul>`;
+              }
+            }
+          }
         }
       }
     }
@@ -724,7 +851,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 .skill-cat-label{font-size:12px;font-weight:700;color:${t.skillLabel}}
 .skill-chip{font-size:12px;padding:2px 9px;border-radius:20px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc}
 </style></head><body><div class="paper">${content || empty}</div></body></html>`;
-  }, [analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder, isDark]);
+  }, [analysis, summary, qualifications, qualifOverrides, experience, bulletModes, skills, education, customSections, sectionOrder, showSummarySection, showRequirementsSection, showSkillsSection, personalInfo, personalInclude, personalFieldOrder, skillCategoryOrder, isDark]);
 
   // Write preview HTML imperatively so the iframe doesn't reload and lose scroll position
   useEffect(() => {
@@ -739,8 +866,8 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   const buildResume = async () => {
     if (!analysis) return;
-    const safeTitle = job.title.replace(/[^a-z0-9]/gi, '_');
-    const safeCompany = job.company.replace(/[^a-z0-9]/gi, '_');
+    const safeTitle = effectiveTitle.replace(/[^a-z0-9]/gi, '_');
+    const safeCompany = effectiveCompany.replace(/[^a-z0-9]/gi, '_');
 
     const sectionHeading = (text: string) => new Paragraph({
       text: text.toUpperCase(),
@@ -789,121 +916,118 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
       children.push(new Paragraph({ children: [], spacing: { after: 200 } }));
     }
 
-    // Summary
-    if (showSummarySection && summary) {
-      children.push(sectionHeading('Professional Summary'));
-      children.push(new Paragraph({ children: [new TextRun({ text: summary, size: 20 })], spacing: { after: 80 } }));
-    }
-
-    // Qualifications
-    const includedQualifs = qualifications.filter(q => q.include);
-    if (showRequirementsSection && includedQualifs.length > 0) {
-      children.push(sectionHeading('Qualifications'));
-      includedQualifs.forEach((q, idx) => {
-        const text = qualifOverrides[qualifications.indexOf(q)] ?? q.match ?? q.readySentence ?? q.requirement;
-        children.push(bullet(text || q.requirement));
-      });
-    }
-
-    // Experience
-    const includedExp = experience.filter(exp => exp.include !== false && exp.bullets.some(b => b.include));
-    if (includedExp.length > 0) {
-      children.push(sectionHeading('Work Experience'));
-      includedExp.forEach((exp, ei) => {
-        const expIdx = experience.indexOf(exp);
-        // Line 1: title (left) · period (right)
-        children.push(new Paragraph({
-          children: [
-            new TextRun({ text: exp.title, bold: true, size: 20 }),
-            ...(exp.period ? [new TextRun({ text: '\t' + exp.period, size: 20, bold: true, italics: true })] : []),
-          ],
-          tabStops: [{ type: 'right', position: 10440 }],
-          spacing: { before: 120, after: 20 },
-        }));
-        // Line 2: company · location
-        const expMeta = [exp.company, exp.location].filter(Boolean).join(', ');
-        if (expMeta) children.push(new Paragraph({
-          children: [new TextRun({ text: expMeta, size: 20, italics: true })],
-          spacing: { after: 40 },
-        }));
-        exp.bullets.forEach((b, bi) => {
-          if (!b.include) return;
-          const mode = bulletModes[`${expIdx}-${bi}`] ?? 'tailored';
-          const text = mode === 'tailored' ? (b.tailored || b.text) : b.text;
-          children.push(bullet(text));
-        });
-      });
-    }
-
-    // Skills grouped by category
-    const includedSkills = skills.filter(s => s.include);
-    if (showSkillsSection && includedSkills.length > 0) {
-      children.push(sectionHeading('Skills'));
-      const skillsByCat = includedSkills.reduce<Record<string, string[]>>((acc, s) => {
-        const cat = s.category || 'Other';
-        if (!acc[cat]) acc[cat] = [];
-        acc[cat].push(s.name);
-        return acc;
-      }, {});
-      const orderedCats = [...new Set([...skillCategoryOrder, ...Object.keys(skillsByCat)])].filter(c => skillsByCat[c]?.length);
-      for (const cat of orderedCats) {
-        children.push(new Paragraph({
-          bullet: { level: 0 },
-          children: [
-            new TextRun({ text: `${cat}: `, bold: true, size: 20 }),
-            new TextRun({ text: skillsByCat[cat].join(', '), size: 20 }),
-          ],
-          spacing: { after: 60 },
-        }));
-      }
-    }
-
-    // Education
-    const includedEdu = education.filter(e => e.include);
-    if (includedEdu.length > 0) {
-      children.push(sectionHeading('Education'));
-      includedEdu.forEach(e => {
-        const datePart = [e.startDate, e.endDate].filter(Boolean).join(' – ');
-        // Line 1: program (left) · date range (right)
-        children.push(new Paragraph({
-          children: [
-            new TextRun({ text: e.program || '', bold: true, size: 20 }),
-            ...(datePart ? [new TextRun({ text: '\t' + datePart, size: 20, bold: true, italics: true })] : []),
-          ],
-          tabStops: [{ type: 'right', position: 10440 }],
-          spacing: { before: 80, after: 20 },
-        }));
-        // Line 2: school, location
-        const eduMeta = [e.school, e.location].filter(Boolean).join(', ');
-        if (eduMeta) children.push(new Paragraph({ children: [new TextRun({ text: eduMeta, size: 20, italics: true })], spacing: { after: 80 } }));
-      });
-    }
-
-    // Custom extra sections
-    for (const sec of customSections.filter(s => s.include)) {
-      const includedEntries = sec.entries.filter(e => e.include);
-      if (!includedEntries.length) continue;
-      const def = CUSTOM_SECTION_TYPES.find(d => d.type === sec.type);
-      children.push(sectionHeading(sec.title));
-      for (const entry of includedEntries) {
-        const f = entry.fields;
-        if (sec.type === 'volunteer' || sec.type === 'additional') {
-          const role = f.role || ''; const org = f.org || f.company || ''; const loc = f.location || '';
-          const period = sec.type === 'volunteer'
-            ? [f.startDate, f.endDate].filter(Boolean).join(' – ')
-            : (f.period || '');
-          children.push(new Paragraph({ children: [new TextRun({ text: role, bold: true, size: 20 }), ...(period ? [new TextRun({ text: '\t' + period, size: 20, bold: true, italics: true })] : [])], tabStops: [{ type: 'right', position: 10440 }], spacing: { before: 100, after: 20 } }));
-          const meta = [org, loc].filter(Boolean).join(', ');
-          if (meta) children.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, italics: true })], spacing: { after: 40 } }));
-          (f.description || '').split('\n').filter(Boolean).forEach(line => children.push(bullet(line)));
-        } else if (sec.type === 'projects') {
-          children.push(new Paragraph({ children: [new TextRun({ text: f.name || '', bold: true, size: 20 }), ...(f.period ? [new TextRun({ text: '\t' + f.period, size: 20, bold: true, italics: true })] : [])], tabStops: [{ type: 'right', position: 10440 }], spacing: { before: 100, after: 20 } }));
-          const meta = [f.tech, f.link].filter(Boolean).join('  ·  ');
-          if (meta) children.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, italics: true })], spacing: { after: 40 } }));
-          (f.description || '').split('\n').filter(Boolean).forEach(line => children.push(bullet(line)));
-        } else {
-          const parts = (def?.fields ?? []).map(fd => f[fd.key]).filter(Boolean);
-          children.push(bullet(parts.join('  ·  ')));
+    // Sections in user-defined order
+    for (const key of sectionOrder) {
+      if (key === 'summary') {
+        if (showSummarySection && summary) {
+          children.push(sectionHeading('Professional Summary'));
+          children.push(new Paragraph({ children: [new TextRun({ text: summary, size: 20 })], spacing: { after: 80 } }));
+        }
+      } else if (key === 'requirements') {
+        const includedQualifs = qualifications.filter(q => q.include);
+        if (showRequirementsSection && includedQualifs.length > 0) {
+          children.push(sectionHeading('Qualifications'));
+          includedQualifs.forEach(q => {
+            const text = qualifOverrides[qualifications.indexOf(q)] ?? q.match ?? q.readySentence ?? q.requirement;
+            children.push(bullet(text || q.requirement));
+          });
+        }
+      } else if (key === 'experience') {
+        const includedExp = experience.filter(exp => exp.include !== false && exp.bullets.some(b => b.include));
+        if (includedExp.length > 0) {
+          children.push(sectionHeading('Work Experience'));
+          includedExp.forEach(exp => {
+            const expIdx = experience.indexOf(exp);
+            children.push(new Paragraph({
+              children: [
+                new TextRun({ text: exp.title, bold: true, size: 20 }),
+                ...(exp.period ? [new TextRun({ text: '\t' + exp.period, size: 20, bold: true, italics: true })] : []),
+              ],
+              tabStops: [{ type: 'right', position: 10440 }],
+              spacing: { before: 120, after: 20 },
+            }));
+            const expMeta = [exp.company, exp.location].filter(Boolean).join(', ');
+            if (expMeta) children.push(new Paragraph({
+              children: [new TextRun({ text: expMeta, size: 20, italics: true })],
+              spacing: { after: 40 },
+            }));
+            exp.bullets.forEach((b, bi) => {
+              if (!b.include) return;
+              const mode = bulletModes[`${expIdx}-${bi}`] ?? 'tailored';
+              const text = mode === 'tailored' ? (b.tailored || b.text) : b.text;
+              children.push(bullet(text));
+            });
+          });
+        }
+      } else if (key === 'education') {
+        const includedEdu = education.filter(e => e.include);
+        if (includedEdu.length > 0) {
+          children.push(sectionHeading('Education'));
+          includedEdu.forEach(e => {
+            const datePart = [e.startDate, e.endDate].filter(Boolean).join(' – ');
+            children.push(new Paragraph({
+              children: [
+                new TextRun({ text: e.program || '', bold: true, size: 20 }),
+                ...(datePart ? [new TextRun({ text: '\t' + datePart, size: 20, bold: true, italics: true })] : []),
+              ],
+              tabStops: [{ type: 'right', position: 10440 }],
+              spacing: { before: 80, after: 20 },
+            }));
+            const eduMeta = [e.school, e.location].filter(Boolean).join(', ');
+            if (eduMeta) children.push(new Paragraph({ children: [new TextRun({ text: eduMeta, size: 20, italics: true })], spacing: { after: 80 } }));
+          });
+        }
+      } else if (key === 'skills') {
+        const includedSkills = skills.filter(s => s.include);
+        if (showSkillsSection && includedSkills.length > 0) {
+          children.push(sectionHeading('Skills'));
+          const skillsByCat = includedSkills.reduce<Record<string, string[]>>((acc, s) => {
+            const cat = s.category || 'Other';
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(s.name);
+            return acc;
+          }, {});
+          const orderedCats = [...new Set([...skillCategoryOrder, ...Object.keys(skillsByCat)])].filter(c => skillsByCat[c]?.length);
+          for (const cat of orderedCats) {
+            children.push(new Paragraph({
+              bullet: { level: 0 },
+              children: [
+                new TextRun({ text: `${cat}: `, bold: true, size: 20 }),
+                new TextRun({ text: skillsByCat[cat].join(', '), size: 20 }),
+              ],
+              spacing: { after: 60 },
+            }));
+          }
+        }
+      } else {
+        const sec = customSections.find(s => s.id === key);
+        if (sec && sec.include) {
+          const includedEntries = sec.entries.filter(e => e.include);
+          if (includedEntries.length > 0) {
+            const def = CUSTOM_SECTION_TYPES.find(d => d.type === sec.type);
+            children.push(sectionHeading(sec.title));
+            for (const entry of includedEntries) {
+              const f = entry.fields;
+              if (sec.type === 'volunteer' || sec.type === 'additional') {
+                const role = f.role || ''; const org = f.org || f.company || ''; const loc = f.location || '';
+                const period = sec.type === 'volunteer'
+                  ? [f.startDate, f.endDate].filter(Boolean).join(' – ')
+                  : (f.period || '');
+                children.push(new Paragraph({ children: [new TextRun({ text: role, bold: true, size: 20 }), ...(period ? [new TextRun({ text: '\t' + period, size: 20, bold: true, italics: true })] : [])], tabStops: [{ type: 'right', position: 10440 }], spacing: { before: 100, after: 20 } }));
+                const meta = [org, loc].filter(Boolean).join(', ');
+                if (meta) children.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, italics: true })], spacing: { after: 40 } }));
+                (f.description || '').split('\n').filter(Boolean).forEach(line => children.push(bullet(line)));
+              } else if (sec.type === 'projects') {
+                children.push(new Paragraph({ children: [new TextRun({ text: f.name || '', bold: true, size: 20 }), ...(f.period ? [new TextRun({ text: '\t' + f.period, size: 20, bold: true, italics: true })] : [])], tabStops: [{ type: 'right', position: 10440 }], spacing: { before: 100, after: 20 } }));
+                const meta = [f.tech, f.link].filter(Boolean).join('  ·  ');
+                if (meta) children.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, italics: true })], spacing: { after: 40 } }));
+                (f.description || '').split('\n').filter(Boolean).forEach(line => children.push(bullet(line)));
+              } else {
+                const parts = (def?.fields ?? []).map(fd => f[fd.key]).filter(Boolean);
+                children.push(bullet(parts.join('  ·  ')));
+              }
+            }
+          }
         }
       }
     }
@@ -941,6 +1065,14 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
   const isLoading = phase === 'extracting' || phase === 'analyzing';
 
+  // Must be before any early returns — hooks cannot come after conditional returns
+  const highlightedJdHtml = useMemo(() => {
+    if (!jdHighlight || !analysis) return null;
+    const html = job.description || localJobDescription || '';
+    if (!html) return null;
+    return highlightKeywordsInHtml(html, analysis.matchedKeywords ?? [], analysis.missingKeywords ?? [], analysis.weakKeywords ?? []);
+  }, [jdHighlight, analysis, job.description, localJobDescription]);
+
   if (wizardStep === 'jd') {
     return (
       <div className="modal-overlay" onClick={onClose}>
@@ -955,13 +1087,15 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
             <button className="modal-close" onClick={onClose}>&times;</button>
           </div>
           <WizardStepJD
-            jobTitle={job.title ?? ''}
-            jobCompany={job.company ?? ''}
+            jobTitle={effectiveTitle}
+            jobCompany={effectiveCompany}
             initialJD={localJobDescription}
-            htmlDescription={job.description || ''}
+            jobUrl={job.url ?? ''}
+            initialScrapeInfo={scrapedMeta ?? ((job.title || job.company) ? { title: job.title || '', company: job.company || '', location: job.location || '', salary: '', jobType: job.type || '' } : null)}
             onNext={handleWizardJDNext}
             onBack={onClose}
             onJDChange={setLocalJobDescription}
+            onScrapedMeta={(title, company, location, salary, jobType) => setScrapedMeta({ title, company, location: location ?? '', salary: salary ?? '', jobType: jobType ?? '' })}
             navDir={navDir}
           />
         </div>
@@ -1130,6 +1264,43 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
     );
   }
 
+  // Live score — recomputes whenever workshop state changes
+  const liveScore = (() => {
+    if (!analysis) return 0;
+    const expIncluded = experience.filter(e => e.include !== false);
+    const allBullets = expIncluded.flatMap((e, ei) => e.bullets.map((b, bi) => ({ b, ei: experience.indexOf(e), bi })));
+    const totalBullets = allBullets.length;
+    const tailoredBullets = allBullets.filter(({ ei, bi }) => getBulletMode(ei, bi) === 'tailored').length;
+    const bulletsWithMetric = allBullets.filter(({ b, ei, bi }) => /\d/.test(getBulletMode(ei, bi) === 'tailored' ? (b.tailored || b.text) : b.text)).length;
+    const bulletsWithVerb = allBullets.filter(({ b, ei, bi }) => {
+      const text = getBulletMode(ei, bi) === 'tailored' ? (b.tailored || b.text) : b.text;
+      const first = text.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
+      return isActionVerb(first);
+    }).length;
+    const contactFields = ['email', 'phone', 'linkedin'] as const;
+    const contactFilled = contactFields.filter(k => personalInclude[k] && personalInfo[k]?.trim()).length;
+    const reqSelected = qualifications.filter(q => q.include).length;
+    const reqTotal = qualifications.length;
+    const missingKwCount = analysis.missingKeywords?.length ?? 0;
+    const jTitleWords = effectiveTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const summaryLower = summary.toLowerCase();
+    const expText = experience.map(e => `${e.title} ${e.company}`).join(' ').toLowerCase();
+    const jTitleHits = jTitleWords.filter(w => summaryLower.includes(w) || expText.includes(w)).length;
+    const jobTitleScore = jTitleWords.length > 0 ? Math.min(10, Math.round((jTitleHits / jTitleWords.length) * 10)) : 6;
+    const reqSkillScore = reqTotal > 0 ? Math.min(25, Math.round((reqSelected / reqTotal) * 25)) : 12;
+    const tailoredRatio = totalBullets > 0 ? tailoredBullets / totalBullets : 0;
+    const expRelevScore = Math.min(20, Math.round(tailoredRatio * 20));
+    const totalKw = analysis.matchedKeywords.length + missingKwCount;
+    const kwContextScore = totalKw > 0 ? Math.min(15, Math.round((analysis.matchedKeywords.length / totalKw) * 15)) : 8;
+    const sectionsCount = [summary.trim().length > 20, expIncluded.length > 0, education.some(e => e.include), skills.some(s => s.include), contactFilled >= 2].filter(Boolean).length;
+    const structScore = Math.min(10, Math.round((sectionsCount / 5) * 10));
+    const verbRatio = totalBullets > 0 ? bulletsWithVerb / totalBullets : 0;
+    const metricRatio = totalBullets > 0 ? bulletsWithMetric / totalBullets : 0;
+    const achieveScore = Math.min(10, Math.round(verbRatio * 5 + metricRatio * 5));
+    return Math.min(100, jobTitleScore + reqSkillScore + expRelevScore + kwContextScore + structScore + 8 + achieveScore);
+  })();
+  const scoreDelta = analysis ? liveScore - analysis.atsScore : 0;
+
   return (
     <div className="modal-overlay">
       <div className="modal-card workshop-modal">
@@ -1147,22 +1318,41 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               Resume Workshop
               {restored && <span className="ws-restored-badge">Restored</span>}
             </div>
-            <div className="tailor-resume-subtitle">{job.title} · {job.company}</div>
+            <div className="tailor-resume-subtitle">{effectiveTitle} · {effectiveCompany}</div>
           </div>
+          <button className="wz-change-resume" onClick={() => { setNavDir('backward'); setWizardStep('jd'); }} title="Change job description">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            Change Job
+          </button>
           <button className="wz-change-resume" onClick={handleChangeResume} title="Change resume">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
             </svg>
             Change Resume
           </button>
+          {phase === 'review' && !isLoading && (
+            <button className="wz-change-resume" onClick={reanalyze} title="Re-analyze resume against job description">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              Re-analyze
+            </button>
+          )}
           {analysis && (
             <div className="ws-header-score">
               <span className="ws-header-score-label">ATS Score</span>
-              <div className="ws-header-score-circle" style={{ borderColor: scoreColor(analysis.atsScore), color: scoreColor(analysis.atsScore) }}>
-                {analysis.atsScore}
+              <div className="ws-header-score-circle" style={{ borderColor: scoreColor(liveScore), color: scoreColor(liveScore) }}>
+                {liveScore}
               </div>
-              <span className="ws-header-score-match" style={{ color: scoreColor(analysis.atsScore) }}>
-                {scoreLabel(analysis.atsScore)}
+              {scoreDelta !== 0 && (
+                <span className="ws-header-score-delta" style={{ color: scoreDelta > 0 ? 'var(--ws-matched-color)' : 'var(--danger)' }}>
+                  {scoreDelta > 0 ? '+' : ''}{scoreDelta}
+                </span>
+              )}
+              <span className="ws-header-score-match" style={{ color: scoreColor(liveScore) }}>
+                {scoreLabel(liveScore)}
               </span>
             </div>
           )}
@@ -1172,8 +1362,40 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
         {/* Loading / Error */}
         {isLoading && (
           <div className="workshop-loading-body">
-            <span className="badge-selector-ai-spinner" />
-            <span>{phase === 'extracting' ? 'Extracting resume content…' : 'Analyzing resume against job description…'}</span>
+            <div className="wz-analyzing-body">
+              <div className="wz-analyzing-hero">
+                <div className="wz-ring wz-ring-3" />
+                <div className="wz-ring wz-ring-2" />
+                <div className="wz-ring wz-ring-1" />
+                <div className="wz-analyzing-icon">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+                    <line x1="20" y1="4" x2="8.12" y2="15.88"/>
+                    <line x1="14.47" y1="14.48" x2="20" y2="20"/>
+                    <line x1="8.12" y1="8.12" x2="12" y2="12"/>
+                  </svg>
+                </div>
+              </div>
+              <div className="wz-analyzing-text">
+                <div className="wz-title">{phase === 'extracting' ? 'Extracting resume content…' : 'Analyzing your resume…'}</div>
+                <div className="wz-analyzing-sub">This takes about 10–20 seconds</div>
+              </div>
+              <div className="wz-analyzing-bar"><div className="wz-analyzing-bar-fill" /></div>
+              <div className="wz-analyzing-list">
+                {['Extracting resume content', 'Matching requirements', 'Tailoring experience', 'Reviewing skills & education', 'Generating tailored content'].map((label, i) => {
+                  const isDone = i < analyzingStep;
+                  const isActive = isLoading && i === analyzingStep;
+                  return (
+                    <div key={label} className="wz-analyzing-row">
+                      <div className={`wz-analyzing-dot ${isDone ? 'done' : isActive ? 'active' : 'pending'}`}>
+                        {isDone ? '✓' : isActive ? <span className="wz-dot-spinner" /> : ''}
+                      </div>
+                      <span className={`wz-analyzing-label${isDone ? ' done' : isActive ? ' active' : ''}`}>{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
         {!isLoading && error && (
@@ -1189,31 +1411,94 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
             {/* ── Left nav ── */}
             <nav className="ws-leftnav">
+              <div className="ws-nav-top-bar">
+                <button
+                  className={`ws-nav-reorder-btn${navReorderMode ? ' active' : ''}`}
+                  onClick={() => { setNavReorderMode(m => !m); setNavDragOverIdx(null); }}
+                  title={navReorderMode ? 'Done reordering' : 'Reorder sections'}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                  </svg>
+                  {navReorderMode ? 'Done' : 'Reorder'}
+                </button>
+              </div>
               <div className="ws-nav-sections">
-                {SECTION_DEFS.map(sec => (
-                  <button
-                    key={sec.key}
-                    className={`ws-nav-item${activeSection === sec.key ? ' active' : ''}`}
-                    onClick={() => setActiveSection(sec.key)}
-                  >
-                    <span className="ws-nav-icon">{sec.icon}</span>
-                    <span className="ws-nav-label">{sec.label}</span>
-                  </button>
-                ))}
+                <button
+                  className={`ws-nav-item${activeSection === 'overview' ? ' active' : ''}`}
+                  onClick={() => setActiveSection('overview')}
+                >
+                  <span className="ws-nav-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                  </span>
+                  <span className="ws-nav-label">Overview</span>
+                </button>
+                {/* Personal Info — pinned, always first */}
+                <div className="ws-nav-divider" />
+                {(() => {
+                  const personalDef = SECTION_DEFS.find(d => d.key === 'personal')!;
+                  return (
+                    <button
+                      className={`ws-nav-item${activeSection === 'personal' ? ' active' : ''}`}
+                      onClick={() => setActiveSection('personal')}
+                    >
+                      <span className="ws-nav-icon">{personalDef.icon}</span>
+                      <span className="ws-nav-label">{personalDef.label}</span>
+                    </button>
+                  );
+                })()}
 
-                {/* Custom section nav items */}
-                {customSections.map(sec => (
-                  <button
-                    key={sec.id}
-                    className={`ws-nav-item${activeSection === sec.id ? ' active' : ''}`}
-                    onClick={() => setActiveSection(sec.id)}
-                  >
-                    <span className="ws-nav-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-                    </span>
-                    <span className="ws-nav-label">{sec.title}</span>
-                  </button>
-                ))}
+                {/* Draggable sections in user-defined order */}
+                {sectionOrder.map((key, idx) => {
+                  const std = SECTION_DEFS.find(d => d.key === key && d.key !== 'personal');
+                  const cust = !std ? customSections.find(s => s.id === key) : null;
+                  const label = std ? std.label : (cust?.title ?? key);
+                  const icon = std ? std.icon : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                  );
+                  return (
+                    <div
+                      key={key}
+                      className={`ws-nav-drag-wrap${navReorderMode ? ' reorder-mode' : ''}`}
+                      draggable={navReorderMode}
+                      onDragStart={navReorderMode ? () => { navDragIdx.current = idx; } : undefined}
+                      onDragOver={navReorderMode ? e => { e.preventDefault(); setNavDragOverIdx(idx); } : undefined}
+                      onDragEnd={navReorderMode ? () => { setNavDragOverIdx(null); navDragIdx.current = null; } : undefined}
+                      onDrop={navReorderMode ? () => {
+                        if (navDragIdx.current === null || navDragIdx.current === idx) { setNavDragOverIdx(null); return; }
+                        setSectionOrder(prev => {
+                          const next = [...prev];
+                          const [moved] = next.splice(navDragIdx.current!, 1);
+                          next.splice(idx, 0, moved);
+                          return next;
+                        });
+                        setNavDragOverIdx(null);
+                        navDragIdx.current = null;
+                      } : undefined}
+                    >
+                      {navDragOverIdx === idx && <div className="ws-nav-drop-line" />}
+                      <button
+                        className={`ws-nav-item${activeSection === key ? ' active' : ''}`}
+                        onClick={() => { if (!navReorderMode) setActiveSection(key); }}
+                      >
+                        {navReorderMode && (
+                          <span className="ws-nav-drag-grip">
+                            <svg width="10" height="14" viewBox="0 0 10 14" fill="none">
+                              <circle cx="3" cy="3" r="1.5" fill="currentColor"/>
+                              <circle cx="7" cy="3" r="1.5" fill="currentColor"/>
+                              <circle cx="3" cy="7" r="1.5" fill="currentColor"/>
+                              <circle cx="7" cy="7" r="1.5" fill="currentColor"/>
+                              <circle cx="3" cy="11" r="1.5" fill="currentColor"/>
+                              <circle cx="7" cy="11" r="1.5" fill="currentColor"/>
+                            </svg>
+                          </span>
+                        )}
+                        <span className="ws-nav-icon">{icon}</span>
+                        <span className="ws-nav-label">{label}</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* + Add Section button */}
@@ -1232,6 +1517,7 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
                           <button key={def.type} className="ws-add-section-item" onClick={() => {
                             const newSec: CustomSection = { id: `${def.type}-${Date.now()}`, type: def.type, title: def.title, entries: [emptyEntry(def)], include: true };
                             setCustomSections(prev => [...prev, newSec]);
+                            setSectionOrder(prev => [...prev, newSec.id]);
                             setActiveSection(newSec.id);
                             setShowAddMenu(false);
                           }}>{def.title}</button>
@@ -1246,6 +1532,344 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
 
             {/* ── Center editor ── */}
             <div className="ws-editor">
+
+              {/* Overview */}
+              {activeSection === 'overview' && (() => {
+                const score = liveScore;
+                const circumference = 2 * Math.PI * 38;
+                const offset = circumference - (score / 100) * circumference;
+
+                // Raw metrics
+                const expIncluded = experience.filter(e => e.include !== false);
+                const allBullets = expIncluded.flatMap((e, ei) => e.bullets.map((b, bi) => ({ b, ei: experience.indexOf(e), bi })));
+                const totalBullets = allBullets.length;
+                const tailoredBullets = allBullets.filter(({ ei, bi }) => getBulletMode(ei, bi) === 'tailored').length;
+                const bulletsWithMetric = allBullets.filter(({ b, ei, bi }) => /\d/.test(getBulletMode(ei, bi) === 'tailored' ? (b.tailored || b.text) : b.text)).length;
+                const bulletsWithVerb = allBullets.filter(({ b, ei, bi }) => {
+                  const text = getBulletMode(ei, bi) === 'tailored' ? (b.tailored || b.text) : b.text;
+                  const first = text.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
+                  return isActionVerb(first);
+                }).length;
+                const avgBulletsPerJob = expIncluded.length ? totalBullets / expIncluded.length : 0;
+                const summaryWords = summary.trim().split(/\s+/).filter(Boolean).length;
+                const contactFields: (keyof typeof personalInfo)[] = ['email', 'phone', 'linkedin'];
+                const contactFilled = contactFields.filter(k => personalInclude[k as keyof typeof personalInclude] && personalInfo[k]?.trim()).length;
+                const reqSelected = qualifications.filter(q => q.include).length;
+                const reqTotal = qualifications.length;
+                const skillsIncluded = skills.filter(s => s.include).length;
+                const missingKwCount = analysis?.missingKeywords?.length ?? 0;
+                const weakKwCount = analysis?.weakKeywords?.length ?? 0;
+                const eduIncluded = education.filter(e => e.include).length;
+
+                // Standards
+                type Std = { ok: boolean; label: string; value: string; tip: string; target: string };
+                const standards: Std[] = [
+                  {
+                    ok: contactFilled === 3,
+                    label: 'Contact info',
+                    value: `${contactFilled}/3 key fields`,
+                    tip: 'Include email, phone, and LinkedIn so recruiters can reach you.',
+                    target: 'personal',
+                  },
+                  {
+                    ok: showSummarySection && summaryWords >= 40,
+                    label: 'Summary depth',
+                    value: summaryWords ? `${summaryWords} words` : 'Not written',
+                    tip: 'Aim for 40–80 words: your background, top strengths, and what you bring to this role.',
+                    target: 'summary',
+                  },
+                  {
+                    ok: avgBulletsPerJob >= 3,
+                    label: 'Bullet density',
+                    value: expIncluded.length ? `avg ${avgBulletsPerJob.toFixed(1)} per role` : 'No experience',
+                    tip: '3–5 bullets per role gives enough detail without overwhelming. Add more with + Add Bullet.',
+                    target: 'experience',
+                  },
+                  {
+                    ok: totalBullets > 0 && bulletsWithVerb / totalBullets >= 0.7,
+                    label: 'Action verbs',
+                    value: totalBullets ? `${bulletsWithVerb}/${totalBullets} bullets` : 'No bullets',
+                    tip: 'Start each bullet with a strong verb: Led, Built, Reduced, Launched, Optimized…',
+                    target: 'experience',
+                  },
+                  {
+                    ok: totalBullets > 0 && bulletsWithMetric / totalBullets >= 0.4,
+                    label: 'Quantified results',
+                    value: totalBullets ? `${bulletsWithMetric}/${totalBullets} bullets` : 'No bullets',
+                    tip: 'Add numbers and percentages: "Reduced load time by 40%", "Managed $2M budget". Aim for 40%+ of bullets.',
+                    target: 'experience',
+                  },
+                  {
+                    ok: tailoredBullets === totalBullets && totalBullets > 0,
+                    label: 'Tailored bullets',
+                    value: totalBullets ? `${tailoredBullets}/${totalBullets} bullets` : 'No bullets',
+                    tip: 'Switch bullets to Tailored (T) so the language aligns with this job\'s requirements.',
+                    target: 'experience',
+                  },
+                  {
+                    ok: reqTotal > 0 && reqSelected === reqTotal,
+                    label: 'Requirements match',
+                    value: reqTotal ? `${reqSelected}/${reqTotal} selected` : 'None extracted',
+                    tip: 'Select a response for every requirement so the section is complete.',
+                    target: 'requirements',
+                  },
+                  {
+                    ok: skillsIncluded >= 5 && missingKwCount === 0,
+                    label: 'Keyword coverage',
+                    value: missingKwCount ? `${missingKwCount} missing` : `${skillsIncluded} skills`,
+                    tip: 'Add missing keywords from the job post to your skills section to boost ATS match.',
+                    target: 'skills',
+                  },
+                  {
+                    ok: eduIncluded > 0,
+                    label: 'Education',
+                    value: eduIncluded ? `${eduIncluded} entr${eduIncluded > 1 ? 'ies' : 'y'}` : 'None included',
+                    tip: 'Include at least one education entry so the recruiter can verify your background.',
+                    target: 'education',
+                  },
+                ];
+
+                const passed = standards.filter(s => s.ok).length;
+                const verbStd = standards.find(s => s.label === 'Action verbs')!;
+                const metricStd = standards.find(s => s.label === 'Quantified results')!;
+
+                // Score breakdown: use AI-provided if available, otherwise estimate from local data
+                const scoreBreakdown = analysis.scoreBreakdown ?? (() => {
+                  const jTitleWords = effectiveTitle.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+                  const summaryLower = summary.toLowerCase();
+                  const expText = experience.map(e => `${e.title} ${e.company}`).join(' ').toLowerCase();
+                  const jTitleHits = jTitleWords.filter((w: string) => summaryLower.includes(w) || expText.includes(w)).length;
+                  const jobTitleScore = jTitleWords.length > 0 ? Math.min(10, Math.round((jTitleHits / jTitleWords.length) * 10)) : 6;
+                  const reqSkillScore = reqTotal > 0 ? Math.min(25, Math.round((reqSelected / reqTotal) * 25)) : 12;
+                  const fullBullets = allBullets.filter(({ b }) => b.matchLevel === 'full').length;
+                  const partialBullets = allBullets.filter(({ b }) => b.matchLevel === 'partial').length;
+                  const expRelevScore = totalBullets > 0 ? Math.min(20, Math.round(((fullBullets + partialBullets * 0.5) / totalBullets) * 20)) : 10;
+                  const totalKw = analysis.matchedKeywords.length + missingKwCount;
+                  const kwContextScore = totalKw > 0 ? Math.min(15, Math.round((analysis.matchedKeywords.length / totalKw) * 15)) : 8;
+                  const sectionsCount = [summary.trim().length > 20, expIncluded.length > 0, education.some(e => e.include), skills.some(s => s.include), contactFilled >= 2].filter(Boolean).length;
+                  const structScore = Math.min(10, Math.round((sectionsCount / 5) * 10));
+                  const verbRatio = totalBullets > 0 ? bulletsWithVerb / totalBullets : 0;
+                  const metricRatio = totalBullets > 0 ? bulletsWithMetric / totalBullets : 0;
+                  const achieveScore = Math.min(10, Math.round(verbRatio * 5 + metricRatio * 5));
+                  return [
+                    { category: 'Job Title Match', score: jobTitleScore, max: 10 },
+                    { category: 'Required Skills', score: reqSkillScore, max: 25 },
+                    { category: 'Experience Relevance', score: expRelevScore, max: 20 },
+                    { category: 'Keyword Context', score: kwContextScore, max: 15 },
+                    { category: 'Resume Structure', score: structScore, max: 10 },
+                    { category: 'ATS Formatting', score: 8, max: 10 },
+                    { category: 'Achievement Quality', score: achieveScore, max: 10 },
+                  ];
+                })();
+
+                const baVerbBefore = (() => {
+                  const item = allBullets.find(({ b, ei, bi }) => {
+                    const text = getBulletMode(ei, bi) === 'tailored' ? (b.tailored || b.text) : b.text;
+                    const first = text.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
+                    return text.trim().length > 10 && !isActionVerb(first);
+                  });
+                  if (!item) return null;
+                  return getBulletMode(item.ei, item.bi) === 'tailored' ? (item.b.tailored || item.b.text) : item.b.text;
+                })();
+                const baVerbAfter = baVerbBefore ? suggestVerbFix(baVerbBefore) : null;
+
+                const baMetricBefore = (() => {
+                  const item = allBullets.find(({ b, ei, bi }) => {
+                    const text = getBulletMode(ei, bi) === 'tailored' ? (b.tailored || b.text) : b.text;
+                    return text.trim().length > 10 && !/\d/.test(text);
+                  });
+                  if (!item) return null;
+                  return getBulletMode(item.ei, item.bi) === 'tailored' ? (item.b.tailored || item.b.text) : item.b.text;
+                })();
+                const baMetricAfter = baMetricBefore ? suggestMetricFix(baMetricBefore) : null;
+
+                type Action = { label: string; tip: string; target: string; priority: 'high' | 'med' | 'low' };
+                const actions: Action[] = standards
+                  .filter(s => !s.ok)
+                  .map(s => {
+                    const priority: 'high' | 'med' | 'low' =
+                      ['Tailored bullets', 'Requirements match', 'Action verbs', 'Quantified results'].includes(s.label) ? 'high'
+                      : ['Keyword coverage', 'Summary depth', 'Bullet density'].includes(s.label) ? 'med'
+                      : 'low';
+                    return { label: s.label, tip: s.tip, target: s.target, priority };
+                  })
+                  .sort((a, b) => ({ high: 0, med: 1, low: 2 }[a.priority] - { high: 0, med: 1, low: 2 }[b.priority]));
+
+                const priorityColor = { high: '#ef4444', med: '#f59e0b', low: '#6366f1' };
+                const priorityLabel = { high: 'High', med: 'Med', low: 'Low' };
+                const effectiveKwTab = kwTab === 'weak' && weakKwCount === 0 ? 'missing' : kwTab;
+
+                return <>
+                  <div className="ws-editor-header">
+                    <div className="ws-editor-section-title">Overview</div>
+                    <div className="ws-ov-header-meta">{passed}/{standards.length} standards met</div>
+                  </div>
+                  <div className="ws-editor-body ws-overview-body">
+
+                    {/* 1. ATS Readiness Score  +  2. Short AI Summary */}
+                    <div className="ws-ov-score-card">
+                      <svg width="96" height="96" viewBox="0 0 96 96" style={{ flexShrink: 0 }}>
+                        <circle cx="48" cy="48" r="38" fill="none" stroke="var(--card-border)" strokeWidth="7" />
+                        <circle cx="48" cy="48" r="38" fill="none" stroke={scoreColor(score)} strokeWidth="7"
+                          strokeDasharray={circumference} strokeDashoffset={offset}
+                          strokeLinecap="round" transform="rotate(-90 48 48)" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+                        <text x="48" y="53" textAnchor="middle" fontSize="20" fontWeight="700" fill={scoreColor(score)}>{score}</text>
+                      </svg>
+                      <div style={{ flex: 1 }}>
+                        <div className="ws-ov-score-label" style={{ color: scoreColor(score) }}>{scoreLabel(score)} · ATS Readiness Score</div>
+                        {scoreDelta !== 0 && (
+                          <div className="ws-ov-score-delta">
+                            <span style={{ color: scoreDelta > 0 ? 'var(--ws-matched-color)' : 'var(--danger)', fontWeight: 600 }}>
+                              {scoreDelta > 0 ? '+' : ''}{scoreDelta} pts
+                            </span>
+                            {' '}from initial AI score of <strong>{analysis.atsScore}</strong>
+                          </div>
+                        )}
+                        {(analysis.aiSummary || analysis.tips?.[0]) && (
+                          <div className="ws-ov-ai-summary">{analysis.aiSummary || analysis.tips[0]}</div>
+                        )}
+                      </div>
+                      {(effectiveTitle || effectiveCompany || resumeDisplayName) && (
+                        <div className="ws-ov-score-context">
+                          {(effectiveTitle || effectiveCompany) && (
+                            <div className="ws-ov-score-ctx-row">
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ws-ov-score-ctx-icon"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                              <div>
+                                <div className="ws-ov-score-ctx-label">Applying for</div>
+                                <div className="ws-ov-score-ctx-value">{effectiveTitle || effectiveCompany}{effectiveTitle && effectiveCompany ? <><br/><span style={{ opacity: 0.75 }}>{effectiveCompany}</span></> : ''}</div>
+                              </div>
+                            </div>
+                          )}
+                          {resumeDisplayName && (
+                            <div className="ws-ov-score-ctx-row">
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ws-ov-score-ctx-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                              <div>
+                                <div className="ws-ov-score-ctx-label">Resume</div>
+                                <div className="ws-ov-score-ctx-value">{resumeDisplayName}</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. Score Breakdown Cards */}
+                    <div className="ws-ov-block">
+                      <div className="ws-ov-block-title">
+                        Score Breakdown
+                        {!analysis.scoreBreakdown && <span className="ws-ov-block-sub"> · estimated</span>}
+                      </div>
+                      <div className="ws-ov-breakdown-grid">
+                        {scoreBreakdown.map((cat, i) => {
+                          const ratio = cat.max > 0 ? cat.score / cat.max : 0;
+                          const col = ratio >= 0.8 ? '#3fa163' : ratio >= 0.55 ? '#f59e0b' : '#ef4444';
+                          return (
+                            <div key={i} className="ws-ov-breakdown-card">
+                              <div className="ws-ov-breakdown-top">
+                                <span className="ws-ov-breakdown-name">{cat.category}</span>
+                                <span className="ws-ov-breakdown-pts" style={{ color: col }}>{cat.score}<span className="ws-ov-breakdown-max">/{cat.max}</span></span>
+                              </div>
+                              <div className="ws-ov-breakdown-bar-bg">
+                                <div className="ws-ov-breakdown-bar-fill" style={{ width: `${ratio * 100}%`, background: col }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 4. Top Improvements to Increase Score */}
+                    {actions.length > 0 && (
+                      <div className="ws-ov-block">
+                        <div className="ws-ov-block-title">Top Improvements</div>
+                        {actions.map((a, i) => (
+                          <button key={i} className="ws-ov-action" onClick={() => setActiveSection(a.target)}>
+                            <span className="ws-ov-action-badge" style={{ background: priorityColor[a.priority] }}>{priorityLabel[a.priority]}</span>
+                            <div className="ws-ov-action-content">
+                              <div className="ws-ov-action-label">
+                                {a.label}
+                                {SCORE_IMPACT[a.label] && <span className="ws-ov-impact-badge ws-ov-impact-badge--action">{SCORE_IMPACT[a.label]}</span>}
+                              </div>
+                              <div className="ws-ov-action-tip">{a.tip}</div>
+                            </div>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ws-ov-chevron"><polyline points="9 18 15 12 9 6"/></svg>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 5+6. Matched / Missing / Weak Keywords */}
+                    {((analysis?.matchedKeywords?.length ?? 0) > 0 || missingKwCount > 0 || weakKwCount > 0) && (
+                      <div className="ws-ov-block">
+                        <div className="ws-ov-block-title">Keyword Coverage</div>
+                        <div className="ws-ov-kw-tabs">
+                          <button className={`ws-ov-kw-tab${effectiveKwTab === 'missing' ? ' active' : ''}`} onClick={() => setKwTab('missing')}>
+                            Missing ({analysis!.missingKeywords.length})
+                          </button>
+                          {weakKwCount > 0 && (
+                            <button className={`ws-ov-kw-tab${effectiveKwTab === 'weak' ? ' active' : ''}`} onClick={() => setKwTab('weak')}>
+                              Weak ({weakKwCount})
+                            </button>
+                          )}
+                          <button className={`ws-ov-kw-tab${effectiveKwTab === 'matched' ? ' active' : ''}`} onClick={() => setKwTab('matched')}>
+                            Matched ({analysis!.matchedKeywords.length})
+                          </button>
+                        </div>
+                        <div className="ws-ov-kw-row">
+                          {effectiveKwTab === 'matched' && analysis!.matchedKeywords.map((kw, i) => <span key={i} className="ws-ov-kw ws-ov-kw-match">✓ {kw}</span>)}
+                          {effectiveKwTab === 'missing' && analysis!.missingKeywords.map((kw, i) => <span key={i} className="ws-ov-kw ws-ov-kw-miss">+ {kw}</span>)}
+                          {effectiveKwTab === 'weak' && (analysis.weakKeywords ?? []).map((kw, i) => <span key={i} className="ws-ov-kw ws-ov-kw-weak">~ {kw}</span>)}
+                          {effectiveKwTab === 'missing' && analysis!.missingKeywords.length === 0 && (
+                            <span className="ws-ov-kw-empty">No missing keywords — great coverage!</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 8. Before & After Bullet Suggestions */}
+                    {((!verbStd.ok && baVerbBefore) || (!metricStd.ok && baMetricBefore)) && (
+                      <div className="ws-ov-block">
+                        <div className="ws-ov-block-title">Before &amp; After</div>
+                        {!verbStd.ok && baVerbBefore && baVerbAfter && (
+                          <div className="ws-ov-ba">
+                            <div className="ws-ov-ba-caption">Action Verb · from your resume</div>
+                            <div className="ws-ov-ba-panel ws-ov-ba-panel--before">
+                              <span className="ws-ov-ba-pill ws-ov-ba-pill--before">Before</span>
+                              <span className="ws-ov-ba-txt">{baVerbBefore}</span>
+                            </div>
+                            <div className="ws-ov-ba-panel ws-ov-ba-panel--after">
+                              <span className="ws-ov-ba-pill ws-ov-ba-pill--after">After</span>
+                              <span className="ws-ov-ba-txt">{baVerbAfter}</span>
+                            </div>
+                          </div>
+                        )}
+                        {!metricStd.ok && baMetricBefore && baMetricAfter && (
+                          <div className="ws-ov-ba">
+                            <div className="ws-ov-ba-caption">Quantified Result · from your resume</div>
+                            <div className="ws-ov-ba-panel ws-ov-ba-panel--before">
+                              <span className="ws-ov-ba-pill ws-ov-ba-pill--before">Before</span>
+                              <span className="ws-ov-ba-txt">{baMetricBefore}</span>
+                            </div>
+                            <div className="ws-ov-ba-panel ws-ov-ba-panel--after">
+                              <span className="ws-ov-ba-pill ws-ov-ba-pill--after">After</span>
+                              <span className="ws-ov-ba-txt">{baMetricAfter}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 9. Final Action Buttons */}
+                    {actions.length === 0 && (
+                      <div className="ws-ov-done">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3fa163" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        All standards met — your resume is ready to export!
+                      </div>
+                    )}
+
+                  </div>
+                </>;
+              })()}
 
               {/* Personal Info */}
               {activeSection === 'personal' && <>
@@ -1508,7 +2132,6 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               {activeSection === 'experience' && <>
                 <div className="ws-editor-header">
                   <div className="ws-editor-section-title">Work Experience</div>
-                  <button className="ws-reanalyze-btn" onClick={reanalyze}>↺ Re-analyze</button>
                 </div>
                 <div className="ws-editor-body">
                   <div className="ws-personal-tip">
@@ -1939,10 +2562,62 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
               />
               {previewTab === 'jd' && (
                 <div className="ws-jd-panel">
+                  {(effectiveTitle || effectiveCompany) && (
+                    <div className="jd-meta-card">
+                      {effectiveTitle && <div className="jd-meta-title">{effectiveTitle}</div>}
+                      <div className="jd-meta-chips">
+                        {effectiveCompany && (
+                          <span className="jd-meta-chip">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                            {effectiveCompany}
+                          </span>
+                        )}
+                        {scrapedMeta?.location && (
+                          <span className="jd-meta-chip">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            {scrapedMeta.location}
+                          </span>
+                        )}
+                        {scrapedMeta?.jobType && (
+                          <span className="jd-meta-chip">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            {scrapedMeta.jobType}
+                          </span>
+                        )}
+                        {scrapedMeta?.salary && (
+                          <span className="jd-meta-chip jd-meta-chip-salary">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                            {scrapedMeta.salary}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {analysis && (
+                    <div className="ws-jd-kw-bar">
+                      <button
+                        className={`ws-jd-highlight-toggle${jdHighlight ? ' active' : ''}`}
+                        onClick={() => setJdHighlight(v => !v)}
+                        title={jdHighlight ? 'Hide keyword highlights' : 'Highlight keywords'}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                        View Keywords
+                      </button>
+                      {jdHighlight && (
+                        <div className="ws-jd-kw-legend">
+                          <span className="ws-jd-kw-chip jd-kw-matched">Covered</span>
+                          <span className="ws-jd-kw-chip jd-kw-weak">Weak</span>
+                          <span className="ws-jd-kw-chip jd-kw-missing">Missing</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {job.description
-                    ? <div className="ws-jd-text description-content" dangerouslySetInnerHTML={{ __html: job.description }} />
+                    ? <div className="description-content" dangerouslySetInnerHTML={{ __html: highlightedJdHtml ?? job.description }} />
                     : localJobDescription
-                      ? <div className="ws-jd-text description-content">{localJobDescription}</div>
+                      ? <div className="description-content" dangerouslySetInnerHTML={{ __html: highlightedJdHtml ?? localJobDescription }} />
                       : <div className="ws-empty">No job description available.</div>
                   }
                 </div>
@@ -1962,13 +2637,11 @@ li{margin-bottom:3px;font-size:13px;color:${t.text}}
           <button className="nav-btn nav-btn-outline" onClick={onClose} disabled={isLoading}>Close</button>
           <div className="ws-footer-actions">
             {!isLoading && error && <button className="nav-btn nav-btn-outline" onClick={reanalyze}>Retry</button>}
-            {phase === 'review' && !isLoading && (
-              <button className="ws-reanalyze-btn" onClick={reanalyze}>↺ Re-analyze</button>
-            )}
             {phase === 'review' && buildDone && <span className="workshop-done-msg">Downloaded!</span>}
             {phase === 'review' && (
-              <button className="nav-btn nav-btn-accent" onClick={() => buildResume().catch(e => setError(String(e)))}>
-                Download .docx
+              <button className="nav-btn nav-btn-accent" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={() => buildResume().catch(e => setError(String(e)))}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Build &amp; Download Resume
               </button>
             )}
           </div>

@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import re
@@ -226,6 +227,247 @@ async def rebuild_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": "attachment; filename=tailored_resume.docx"},
     )
+
+
+# ── Job Scraper ───────────────────────────────────────────────────────────────
+
+class ScrapeJobRequest(BaseModel):
+    url: str
+
+
+_JOB_TYPE_RE = re.compile(
+    r'\b(full[- ]?time|part[- ]?time|contract|temporary|temp|internship|intern|permanent|casual|seasonal|freelance|per diem|fixed[- ]?term|volunteer)\b',
+    re.IGNORECASE,
+)
+
+def _clean_job_type(raw: str) -> str:
+    """Extract the first recognisable employment-type term from noisy scraped text."""
+    m = _JOB_TYPE_RE.search(raw)
+    if m:
+        return m.group(0).title()
+    # Fallback: first non-empty line, capped at 30 chars
+    first = next((ln.strip() for ln in raw.splitlines() if ln.strip()), raw.strip())
+    return first[:30]
+
+
+def _detect_source(url: str) -> str:
+    if "linkedin.com" in url:
+        return "linkedin"
+    if "indeed.com" in url:
+        return "indeed"
+    if "glassdoor." in url:
+        return "glassdoor"
+    return "generic"
+
+
+def _inner_html(el_list) -> str:
+    """Return inner HTML of the first matched element, trying multiple scrapling/parsel APIs."""
+    if not el_list:
+        return ""
+
+    import re
+
+    def strip_outer_tag(html: str) -> str:
+        inner = re.sub(r'^<[^>]*>', '', html, count=1, flags=re.DOTALL)
+        inner = re.sub(r'</[a-zA-Z][a-zA-Z0-9-]*>\s*$', '', inner.strip())
+        return inner.strip()
+
+    # Method 1: SelectorList.getall() — parsel idiom; returns list of outer-HTML strings
+    try:
+        htmls = el_list.getall()
+        if htmls and isinstance(htmls[0], str) and '<' in htmls[0]:
+            stripped = strip_outer_tag(htmls[0])
+            if stripped:
+                return stripped
+    except Exception:
+        pass
+
+    el = el_list[0]
+
+    # Method 2: element .get() — parsel Selector method
+    try:
+        outer = el.get()
+        if outer and isinstance(outer, str) and '<' in outer:
+            stripped = strip_outer_tag(outer)
+            if stripped:
+                return stripped
+    except Exception:
+        pass
+
+    # Method 3: .html attribute — selectolax / some scrapling versions
+    try:
+        html = getattr(el, 'html', None)
+        if html and isinstance(html, str) and '<' in html:
+            stripped = strip_outer_tag(html)
+            if stripped:
+                return stripped
+    except Exception:
+        pass
+
+    # Method 4: lxml .root
+    try:
+        from lxml import etree
+        root = el.root
+        result = ''.join(etree.tostring(child, encoding='unicode') for child in root)
+        if result:
+            return result
+    except Exception:
+        pass
+
+    return el.get_all_text().strip()
+
+
+def _txt(page, sel: str) -> str:
+    el = page.css(sel)
+    return el[0].get_all_text().strip() if el else ""
+
+
+def _scrape_linkedin(page) -> dict:
+    # Title — try specific class first, then generic h1
+    title = (
+        page.css("h1.top-card-layout__title::text").get("").strip()
+        or page.css("h1.topcard__title::text").get("").strip()
+        or page.css("h1::text").get("").strip()
+    )
+    # Company
+    company = (
+        page.css(".topcard__org-name-link::text").get("").strip()
+        or page.css(".top-card-layout__card .topcard__flavor--black-link::text").get("").strip()
+        or page.css("[class*='company-name']::text").get("").strip()
+    )
+    # Location
+    location = (
+        page.css(".topcard__flavor--bullet::text").get("").strip()
+        or page.css("[class*='topcard__flavor']::text").get("").strip()
+        or page.css("[class*='location']::text").get("").strip()
+    )
+    # Job type from criteria list
+    job_type = ""
+    for item in page.css(".description__job-criteria-item"):
+        label = item.css("h3::text").get("").strip()
+        value = item.css(".description__job-criteria-text::text").get("").strip()
+        if label.lower() in ("employment type", "job type") and value:
+            job_type = _clean_job_type(value)
+    # Description — try selectors in order, take first with >100 chars
+    description = ""
+    for sel in [
+        "[data-testid='expandable-text-box']",
+        ".show-more-less-html__markup",
+        "#job-details",
+        "[class*='description__text--rich']",
+        "[class*='job-details-description']",
+        "[class*='description__text']",
+        "article[class*='jobs-description']",
+        "[class*='jobs-description__content']",
+        ".description",
+    ]:
+        el = page.css(sel)
+        if el:
+            candidate = _inner_html(el) or el[0].get_all_text().strip()
+            if len(candidate) > 100:
+                description = candidate
+                break
+    return {"title": title, "company": company, "location": location, "jobType": job_type, "salary": "", "description": description}
+
+
+_SALARY_RE = re.compile(
+    r'(?:CA\s*)?\$[\d,]+(?:\s*[–—\-]\s*(?:CA\s*)?\$?[\d,]+)?\s*'
+    r'(?:an?\s+hour|per\s+hour|/\s*hr\.?|hourly|a\s+year|per\s+year|/\s*yr\.?|annually)',
+    re.IGNORECASE,
+)
+
+def _extract_salary(raw: str, page) -> str:
+    """Try raw text first, then fall back to list-item elements."""
+    m = _SALARY_RE.search(raw)
+    if m:
+        return m.group(0).strip()
+    salary_els = page.css("[data-testid='list-item']::text").getall()
+    return next((s.strip() for s in salary_els if re.search(r'\$|hour|year|salary', s, re.IGNORECASE)), "")
+
+def _scrape_indeed(page) -> dict:
+    title    = _txt(page, "[data-testid='jobsearch-JobInfoHeader-title']")
+    company  = _txt(page, "[data-testid='inlineHeader-companyName']")
+    location = _txt(page, "[data-testid='inlineHeader-companyLocation']")
+    raw_details = _txt(page, "[data-testid='jobsearch-OtherJobDetailsContainer']")
+    job_type = _clean_job_type(raw_details)
+    salary   = _extract_salary(raw_details, page)
+    desc_el  = page.css("#jobDescriptionText")
+    description = _inner_html(desc_el)
+    return {"title": title, "company": company, "location": location, "jobType": job_type, "salary": salary, "description": description}
+
+
+def _scrape_glassdoor(page) -> dict:
+    title    = _txt(page, "[data-test='job-title']") or _txt(page, "h1")
+    company  = (_txt(page, "[class*='employerNameHeading']")
+                or _txt(page, "[data-test='employer-name']")
+                or _txt(page, "[class*='employerName']"))
+    location = _txt(page, "[data-test='emp-location']") or _txt(page, "[class*='location']")
+    salary   = _txt(page, "[data-test='detailSalary']") or _txt(page, "[class*='salary']")
+    job_type = _clean_job_type(_txt(page, "[data-test='employment-type']") or _txt(page, "[class*='employmentType']"))
+    desc_el  = (
+        page.css("[class*='jobDescription']")
+        or page.css("[class*='jobDescriptionContent']")
+        or page.css("#JobDescriptionContainer")
+        or page.css("[data-test='jobDescriptionText']")
+    )
+    description = _inner_html(desc_el)
+    return {"title": title, "company": company, "location": location, "jobType": job_type, "salary": salary, "description": description}
+
+
+def _scrape_generic(page) -> dict:
+    title    = page.css("h1::text").get("").strip()
+    company  = ""
+    location = ""
+    description = ""
+    for sel in ["[class*='jobDescription']", "[class*='job-description']", "[class*='description']", "main", "article"]:
+        el = page.css(sel)
+        if el:
+            candidate = _inner_html(el) or el[0].get_all_text().strip()
+            if len(candidate) > 100:
+                description = candidate
+                break
+    return {"title": title, "company": company, "location": location, "jobType": "", "salary": "", "description": description}
+
+
+@app.post("/api/scrape-job")
+async def scrape_job(req: ScrapeJobRequest):
+    try:
+        from scrapling.fetchers import DynamicFetcher
+    except ImportError:
+        raise HTTPException(status_code=503, detail="scrapling not installed — run: pip install scrapling")
+
+    url = req.url
+    # Normalise Indeed redirect/listing URLs (handles jk=, vjk=, ca.indeed.com, etc.)
+    if "indeed.com" in url and "viewjob" not in url:
+        from urllib.parse import urlparse, parse_qs
+        _parsed = urlparse(url)
+        _qs = parse_qs(_parsed.query)
+        jk = (_qs.get("jk") or _qs.get("vjk") or [None])[0]
+        if jk:
+            url = f"https://{_parsed.netloc}/viewjob?jk={jk}"
+
+    source = _detect_source(url)
+    wait_ms = 8000 if source == "glassdoor" else 6000 if source == "linkedin" else 5000
+
+    try:
+        # DynamicFetcher uses Playwright sync API — run in a thread to avoid asyncio conflict
+        page = await asyncio.to_thread(lambda: DynamicFetcher.fetch(url, wait=wait_ms))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch page: {exc}")
+
+    if source == "linkedin":
+        result = _scrape_linkedin(page)
+    elif source == "indeed":
+        result = _scrape_indeed(page)
+    elif source == "glassdoor":
+        result = _scrape_glassdoor(page)
+    else:
+        result = _scrape_generic(page)
+
+    if not result.get("description"):
+        raise HTTPException(status_code=422, detail="Could not extract job description from the page")
+
+    return result
 
 
 # ── AI Complete (server-side) ──────────────────────────────────────────────────

@@ -472,6 +472,17 @@ Return ONLY valid JSON (no markdown, no code fences, no explanation):
   "atsScore": 85,
   "matchedKeywords": ["keyword1", "keyword2"],
   "missingKeywords": ["missing1", "missing2"],
+  "weakKeywords": ["keywords present in skills only, not in experience bullets"],
+  "aiSummary": "2-3 sentences explaining the overall match quality and the most important gaps to address first",
+  "scoreBreakdown": [
+    { "category": "Job Title Match", "score": 8, "max": 10 },
+    { "category": "Required Skills", "score": 18, "max": 25 },
+    { "category": "Experience Relevance", "score": 14, "max": 20 },
+    { "category": "Keyword Context", "score": 10, "max": 15 },
+    { "category": "Resume Structure", "score": 9, "max": 10 },
+    { "category": "ATS Formatting", "score": 8, "max": 10 },
+    { "category": "Achievement Quality", "score": 7, "max": 10 }
+  ],
   "tips": ["Tip to improve match", "Another tip"],
   "qualifications": [
     {
@@ -573,6 +584,17 @@ export async function analyzeTailorSections(
       atsScore: typeof parsed.atsScore === 'number' ? Math.max(0, Math.min(100, parsed.atsScore)) : 0,
       matchedKeywords: Array.isArray(parsed.matchedKeywords) ? parsed.matchedKeywords.map(String) : [],
       missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords.map(String) : [],
+      weakKeywords: Array.isArray(parsed.weakKeywords) ? parsed.weakKeywords.map(String) : undefined,
+      aiSummary: typeof parsed.aiSummary === 'string' && parsed.aiSummary ? parsed.aiSummary : undefined,
+      scoreBreakdown: Array.isArray(parsed.scoreBreakdown)
+        ? (parsed.scoreBreakdown as Record<string, unknown>[])
+            .filter((c) => c && typeof c === 'object' && c.category)
+            .map((c) => ({
+              category: String(c.category),
+              score: Math.max(0, typeof c.score === 'number' ? Math.round(c.score) : 0),
+              max: typeof c.max === 'number' && c.max > 0 ? c.max : 10,
+            }))
+        : undefined,
       tips: Array.isArray(parsed.tips) ? parsed.tips.map(String) : [],
       qualifications: Array.isArray(parsed.qualifications)
         ? parsed.qualifications.map((q: Record<string, unknown>) => ({

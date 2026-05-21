@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged, watchJobDescription, fetchMissingDescriptions, updateCachedDescription } from '../services/jobService';
+import { getUnreadJobs, getReadJobs, getAllJobs, deleteJob, toggleJobSaved, toggleJobApplied, toggleJobReadStatus, updateJobBadges, onJobsChanged, watchJobDescription, fetchMissingDescriptions, updateCachedDescription, saveJobDescription } from '../services/jobService';
 import { getSettings } from '../services/settingsService';
 import { BadgeSelector } from './BadgeSelector';
 import { BADGE_CATEGORIES } from '../constants/badgeDefinitions';
@@ -295,6 +295,26 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
     await toggleJobApplied(id, newApplied);
     setJobs(prev => prev.map(j => j.id === id ? { ...j, applied: newApplied } : j));
     onJobsChanged?.();
+  };
+
+  const handleScrape = async (job: { id: string; url?: string }) => {
+    if (!job.url || scrapingJobIds.has(job.id)) return;
+    setScrapingJobIds(prev => new Set(prev).add(job.id));
+    try {
+      const res = await fetch('/api/scrape-job', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: job.url }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const description: string = data.description ?? '';
+      if (!description) return;
+      await saveJobDescription(job.id, description);
+      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, description } : j));
+    } catch { /* backend not running */ } finally {
+      setScrapingJobIds(prev => { const next = new Set(prev); next.delete(job.id); return next; });
+    }
   };
 
   const toggleRead = async (jobId: string, read: boolean) => {
@@ -639,6 +659,20 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
                               </svg>
                             )}
                           </button>
+                          {job.url && (
+                            <button
+                              className={`card-icon-btn card-btn-scrape${scrapingJobIds.has(job.id) ? ' scraping' : ''}`}
+                              onClick={() => handleScrape(job)}
+                              disabled={scrapingJobIds.has(job.id)}
+                              title={job.description ? 'Re-fetch job description' : 'Fetch job description'}
+                            >
+                              {scrapingJobIds.has(job.id) ? (
+                                <svg className="scrape-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                              ) : (
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                              )}
+                            </button>
+                          )}
                           <button className="card-icon-btn card-btn-delete" onClick={() => handleDelete(job.id)} title="Delete">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                           </button>
@@ -699,20 +733,20 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                         </button>
                       </div>
-                      {scrapingJobIds.has(job.id) && !job.description && (
+                      {scrapingJobIds.has(job.id) && (
                         <div className="scraping-indicator">
                           <span className="scraping-spinner" />
                           Scraping job description...
                         </div>
                       )}
-                      {job.description && (
+                      {job.description && !scrapingJobIds.has(job.id) && (
                         <div className="job-description-section">
                           <div className="description-section-controls">
                             <button
-                              className={`description-toggle ${expandedDescriptionId === job.id ? 'expanded' : ''}`}
-                              onClick={() => setExpandedDescriptionId(prev => prev === job.id ? null : job.id)}
+                              className="description-toggle"
+                              onClick={() => setExpandedDescriptionId(job.id)}
                             >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points={expandedDescriptionId === job.id ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}/></svg>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                               Job Description
                             </button>
                             <button
@@ -724,9 +758,6 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
                               ✨ Tailor Resume
                             </button>
                           </div>
-                          {expandedDescriptionId === job.id && (
-                            <div className="description-content" dangerouslySetInnerHTML={{ __html: job.description }} />
-                          )}
                         </div>
                       )}
                       {badgeSelectorOpenId === job.id && (
@@ -785,6 +816,37 @@ export function Dashboard({ refreshTrigger, onJobsChanged }: DashboardProps) {
           onClose={closeTailorModal}
         />
       )}
+
+      {expandedDescriptionId && (() => {
+        const job = jobs.find(j => j.id === expandedDescriptionId);
+        if (!job?.description) return null;
+        return (
+          <div className="modal-overlay" onClick={() => setExpandedDescriptionId(null)}>
+            <div className="modal-card jd-modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div className="jd-modal-title">
+                  <div className="jd-modal-job-title">{job.title}</div>
+                  {job.company && <div className="jd-modal-company">{job.company}</div>}
+                </div>
+                <div className="jd-modal-actions">
+                  <button
+                    className="tailor-resume-btn"
+                    onClick={() => { setExpandedDescriptionId(null); handleTailorResume(job); }}
+                    disabled={settings.aiProvider === 'none' || !settings.aiApiKey}
+                    title={settings.aiProvider === 'none' || !settings.aiApiKey ? 'Configure an AI provider in Settings to use this feature' : 'Tailor your resume to this job using AI'}
+                  >
+                    ✨ Tailor Resume
+                  </button>
+                  <button className="modal-close" onClick={() => setExpandedDescriptionId(null)}>&times;</button>
+                </div>
+              </div>
+              <div className="modal-body jd-modal-body">
+                <div className="description-content" dangerouslySetInnerHTML={{ __html: job.description }} />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

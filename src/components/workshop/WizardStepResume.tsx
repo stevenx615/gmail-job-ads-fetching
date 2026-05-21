@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import mammoth from 'mammoth';
-import { getSavedResumes, saveResume, deleteResume, daysAgo } from './resumeStorage';
+import { getSavedResumes, saveResume, deleteResume, renameResume, duplicateResume, daysAgo } from './resumeStorage';
 import type { SavedResume } from './resumeStorage';
 
 interface Props {
@@ -22,7 +23,35 @@ export function WizardStepResume({ onUpload, onScratch, onBack, onSelectResume, 
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  function openMenu(id: string, btn: HTMLButtonElement) {
+    const rect = btn.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setMenuOpenId(id);
+    menuTriggerRef.current = btn;
+  }
+
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        menuRef.current && !menuRef.current.contains(target) &&
+        menuTriggerRef.current && !menuTriggerRef.current.contains(target)
+      ) setMenuOpenId(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpenId]);
 
   const hasSaved = savedResumes.length > 0;
   const selectedResume = selectedId ? savedResumes.find(r => r.id === selectedId) ?? null : null;
@@ -56,6 +85,33 @@ export function WizardStepResume({ onUpload, onScratch, onBack, onSelectResume, 
     e.preventDefault();
     const f = e.dataTransfer.files[0];
     if (f?.name.endsWith('.docx')) handleFileSelected(f);
+  }
+
+  function startRename(r: { id: string; name: string }) {
+    setConfirmDeleteId(null);
+    setMenuOpenId(null);
+    setRenamingId(r.id);
+    setRenameValue(r.name);
+    setRenameError('');
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }
+
+  function handleDuplicate(id: string) {
+    setMenuOpenId(null);
+    duplicateResume(id);
+    setSavedResumes(getSavedResumes());
+  }
+
+  function commitRename() {
+    if (!renamingId) return;
+    const name = renameValue.trim();
+    if (!name) { setRenamingId(null); setRenameError(''); return; }
+    const duplicate = savedResumes.some(r => r.id !== renamingId && r.name.trim().toLowerCase() === name.toLowerCase());
+    if (duplicate) { setRenameError('A resume with this name already exists.'); renameInputRef.current?.focus(); return; }
+    renameResume(renamingId, name);
+    setSavedResumes(getSavedResumes());
+    setRenamingId(null);
+    setRenameError('');
   }
 
   function handleDelete(id: string) {
@@ -220,7 +276,7 @@ export function WizardStepResume({ onUpload, onScratch, onBack, onSelectResume, 
             <div className="wz-re-list-card-title">Saved resumes</div>
             <div className="wz-resume-explorer">
               {savedResumes.map(r => (
-                <div key={r.id} className={`wz-re-card${selectedId === r.id ? ' active' : ''}`} onClick={() => setSelectedId(selectedId === r.id ? null : r.id)}>
+                <div key={r.id} className={`wz-re-card${selectedId === r.id ? ' active' : ''}`} onClick={() => renamingId !== r.id && setSelectedId(selectedId === r.id ? null : r.id)}>
                   <div className="wz-re-card-icon">
                     {r.type === 'docx'
                       ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -228,11 +284,31 @@ export function WizardStepResume({ onUpload, onScratch, onBack, onSelectResume, 
                     }
                   </div>
                   <div className="wz-re-card-info">
-                    <div className="wz-re-card-name">{r.name}</div>
+                    {renamingId === r.id ? (
+                      <>
+                        <input
+                          ref={renameInputRef}
+                          className={`wz-re-rename-input${renameError ? ' wz-re-rename-input-error' : ''}`}
+                          value={renameValue}
+                          onChange={e => { setRenameValue(e.target.value); setRenameError(''); }}
+                          onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setRenamingId(null); setRenameError(''); } }}
+                          onBlur={commitRename}
+                          onClick={e => e.stopPropagation()}
+                        />
+                        {renameError && <div className="wz-re-rename-error">{renameError}</div>}
+                      </>
+                    ) : (
+                      <div className="wz-re-card-name">{r.name}</div>
+                    )}
                     <div className="wz-re-card-meta">Updated {daysAgo(r.uploadedAt)} · {r.type === 'docx' ? 'DOCX' : 'Scratch'}</div>
                   </div>
                   <div className="wz-re-card-actions" onClick={e => e.stopPropagation()}>
-                    {confirmDeleteId === r.id ? (
+                    {renamingId === r.id ? (
+                      <>
+                        <button className="wz-re-btn wz-re-btn-confirm" onMouseDown={e => { e.preventDefault(); commitRename(); }} title="Save name">✓</button>
+                        <button className="wz-re-btn" onMouseDown={e => { e.preventDefault(); setRenamingId(null); }} title="Cancel">✕</button>
+                      </>
+                    ) : confirmDeleteId === r.id ? (
                       <>
                         <span className="wz-re-confirm-label">Remove?</span>
                         <button className="wz-re-btn wz-re-btn-danger" onClick={() => handleDelete(r.id)}>Yes</button>
@@ -244,8 +320,12 @@ export function WizardStepResume({ onUpload, onScratch, onBack, onSelectResume, 
                           <span className="wz-re-analyzed-badge">Analyzed</span>
                         )}
                         <button className="wz-re-btn" onClick={() => setPreviewId(r.id)}>Preview</button>
-                        <button className="wz-re-btn-delete" onClick={() => setConfirmDeleteId(r.id)} title="Remove">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                        <button
+                          className={`wz-re-menu-btn${menuOpenId === r.id ? ' active' : ''}`}
+                          onClick={e => menuOpenId === r.id ? setMenuOpenId(null) : openMenu(r.id, e.currentTarget)}
+                          title="More actions"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
                         </button>
                       </>
                     )}
@@ -301,6 +381,30 @@ export function WizardStepResume({ onUpload, onScratch, onBack, onSelectResume, 
             : <button className="nav-btn nav-btn-accent" onClick={() => onSelectResume?.(selectedResume.content, selectedResume.id)}>Analyze</button>
         )}
       </div>
+
+      {/* Three-dots dropdown — portaled to body to escape overflow:hidden ancestors */}
+      {menuOpenId && menuPos && (() => {
+        const r = savedResumes.find(x => x.id === menuOpenId);
+        if (!r) return null;
+        return createPortal(
+          <div ref={menuRef} className="wz-re-menu-dropdown" style={{ position: 'fixed', top: menuPos.top, right: menuPos.right }}>
+            <button className="wz-re-menu-item" onClick={() => startRename(r)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+              Rename
+            </button>
+            <button className="wz-re-menu-item" onClick={() => handleDuplicate(r.id)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Duplicate
+            </button>
+            <div className="wz-re-menu-divider" />
+            <button className="wz-re-menu-item wz-re-menu-item-danger" onClick={() => { setMenuOpenId(null); setConfirmDeleteId(r.id); }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+              Delete
+            </button>
+          </div>,
+          document.body
+        );
+      })()}
 
       {/* Resume preview modal-on-modal */}
       {previewResume && (

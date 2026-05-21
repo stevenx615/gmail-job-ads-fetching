@@ -79,6 +79,13 @@ export interface TailorAnalysis {
   atsScore: number;
   matchedKeywords: string[];
   missingKeywords: string[];
+  weakKeywords?: string[];
+  aiSummary?: string;
+  scoreBreakdown?: {
+    category: string;
+    score: number;
+    max: number;
+  }[];
   tips: string[];
   qualifications: TailorQualification[];
   experience: TailorExperience[];

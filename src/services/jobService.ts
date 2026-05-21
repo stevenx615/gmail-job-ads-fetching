@@ -298,6 +298,11 @@ export function updateCachedDescription(jobId: string, description: string): voi
   }).catch(() => { /* ignore — IDB may not be seeded yet */ });
 }
 
+export async function saveJobDescription(id: string, description: string): Promise<void> {
+  await updateDoc(doc(db, COLLECTION_NAME, id), { description });
+  updateCachedDescription(id, description);
+}
+
 export async function fetchJobsWithDescriptions(): Promise<Map<string, string>> {
   const q = query(collection(db, COLLECTION_NAME), where('description', '!=', ''));
   const snap = await getDocs(q);
